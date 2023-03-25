@@ -133,6 +133,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     for note in rx {
         if note.note_id == SESSION_NOTE {
             // Close everything
+            let thread_tx_midi = tx_midi;
+            for note in 1..99 {
+                let note = Note::new(note, "", 0);
+                thread_tx_midi.send((note, false)).unwrap();
+            }
             break;
         }
         if note.note_id == PREV_PAGE_NOTE {

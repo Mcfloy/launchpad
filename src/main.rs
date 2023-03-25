@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use cpal::Device;
 use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{OutputStreamHandle, Source};
+use rodio::Source;
 
 use crate::colors::{GREEN, WHITE};
 use crate::referential::{Note, Page};
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }));
 
 
-    for note in 1..88 {
+    for note in 1..89 {
         conn_out.send(&[144, note, 0]).unwrap();
     }
 
@@ -159,7 +159,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         if note.note_id == PREV_PAGE_NOTE {
             if current_page.load(Ordering::Relaxed) > 0 {
                 current_page.fetch_sub(1, Ordering::Relaxed);
-                println!("Current page: {}", current_page.load(Ordering::Relaxed));
                 let page = referential.get_page(current_page.load(Ordering::Relaxed))
                     .unwrap().clone();
                 let app_state = Arc::clone(&app_state);
@@ -190,7 +189,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             app_state.lock().unwrap().set_page(page.clone());
 
             let thread_tx_midi = tx_midi.clone();
-            for note in 1..88 {
+            for note in 1..89 {
                 let note = Note::new(note, "", 0);
                 thread_tx_midi.send((note, false)).unwrap();
             }
@@ -216,7 +215,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         main_handle.play_raw(source.convert_samples()).unwrap();
 
         let file = BufReader::new(File::open(Path::new(note.path)).unwrap());
-        let source = rodio::Decoder::new(file).unwrap();
+        let source = rodio::Decoder::new(file).unwrap()
+            .amplify(0.1);
         virtual_handle.play_raw(source.convert_samples()).unwrap();
     }
 

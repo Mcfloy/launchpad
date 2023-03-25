@@ -11,8 +11,9 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
-use cpal::traits::HostTrait;
-use rodio::Source;
+use cpal::Device;
+use cpal::traits::{DeviceTrait, HostTrait};
+use rodio::{OutputStreamHandle, Source};
 
 use crate::colors::{GREEN, WHITE};
 use crate::referential::{Note, Page};
@@ -28,7 +29,7 @@ type NoteState = (Note, bool);
 
 #[derive(Debug, Clone)]
 struct AppState {
-    pub page: Page
+    pub page: Page,
 }
 
 impl AppState {
@@ -128,7 +129,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     let host = cpal::default_host();
     let output_device = host.default_output_device().expect("Failed to get default output device");
     // let input_device = host.default_input_device().expect("Failed to get default input device");
-    let (_stream, handle) = rodio::OutputStream::try_from_device(&output_device).unwrap();
+    let (_stream, main_handle) = rodio::OutputStream::try_from_device(&output_device).unwrap();
+
+    let mut virtual_device: Option<Device> = None;
+    for device in host.output_devices().unwrap() {
+        if device.name().unwrap() == "CABLE Input (VB-Audio Virtual Cable)" {
+            virtual_device = Some(device);
+        }
+    }
+    if virtual_device.is_none() {
+        println!("No virtual device found");
+        return Ok(());
+    }
+    let (_stream, virtual_handle) = rodio::OutputStream::try_from_device(&virtual_device.unwrap()).unwrap();
+
 
     // Loop to handle the playback
     for note in rx {
@@ -187,7 +201,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             continue;
         }
         let file = BufReader::new(File::open(Path::new(note.path)).unwrap());
-        let source = rodio::Decoder::new(file).unwrap();
+        let source = rodio::Decoder::new(file).unwrap()
+            .amplify(0.1);
         if let Some(duration) = source.total_duration() {
             // Light on the note and light off after the duration
             let thread_tx_midi = tx_midi.clone();
@@ -198,7 +213,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
         }
 
-        handle.play_raw(source.convert_samples()).unwrap();
+        main_handle.play_raw(source.convert_samples()).unwrap();
+
+        let file = BufReader::new(File::open(Path::new(note.path)).unwrap());
+        let source = rodio::Decoder::new(file).unwrap();
+        virtual_handle.play_raw(source.convert_samples()).unwrap();
     }
 
     Ok(())

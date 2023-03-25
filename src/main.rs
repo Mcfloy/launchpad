@@ -9,6 +9,7 @@ use std::sync::{Arc, mpsc, Mutex};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
+use std::time::Duration;
 
 use cpal::traits::HostTrait;
 use rodio::Source;
@@ -138,6 +139,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let note = Note::new(note, "", 0);
                 thread_tx_midi.send((note, false)).unwrap();
             }
+            thread::sleep(Duration::from_millis(100));
             break;
         }
         if note.note_id == PREV_PAGE_NOTE {

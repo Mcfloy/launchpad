@@ -1140,6 +1140,7 @@ dependencies = [
  "iced",
  "lazy_static",
  "midir",
+ "ringbuf",
  "rodio",
 ]
 
@@ -1899,6 +1900,15 @@ name = "renderdoc-sys"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1382d1f0a252c4bf97dc20d979a2fdd05b024acd7c2ed0f7595d7817666a157"
+
+[[package]]
+name = "ringbuf"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93ca10b9c9e53ac855a2d6953bce34cef6edbac32c4b13047a4d59d67299420a"
+dependencies = [
+ "crossbeam-utils",
+]
 
 [[package]]
 name = "rodio"

@@ -49,9 +49,9 @@ impl Referential {
         }
     }
 
-    pub fn init(&mut self) {
-        let pages_path = env::current_dir().unwrap().join("pages");
-        let paths = fs::read_dir(pages_path).unwrap();
+    pub fn init(&mut self, folder: String) {
+        self.pages = vec![];
+        let paths = fs::read_dir(folder.as_str()).unwrap();
         for path in paths {
             let path = path.unwrap().path();
 
@@ -72,7 +72,7 @@ impl Referential {
             }
         }
     }
-    
+
     pub fn get_nb_pages(&self) -> u8 {
         self.pages.len() as u8
     }

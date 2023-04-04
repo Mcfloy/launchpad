@@ -10,9 +10,9 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1.0.66"
-cpal = "0.14.1"
-iced = "0.4.2"
+cpal = "0.15.2"
 lazy_static = "1.4.0"
-midir = "0.8.0"
-rodio = "0.16.0"
-ringbuf = "0.3.2"
+midir = "0.9.1"
+rodio = "0.17.1"
+serde = { version = "1.0.158", features = ["derive"] }
+config-file = { version = "0.2.3", features = ["yaml"] }

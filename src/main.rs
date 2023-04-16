@@ -17,7 +17,7 @@ use rodio::{Sink, Source};
 
 use crate::colors::{GREEN, WHITE};
 use crate::config::Config;
-use crate::referential::{Note, Page};
+use crate::referential::{Note, Page, Referential};
 
 mod config;
 mod referential;
@@ -125,7 +125,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let (_stream, virtual_handle) = rodio::OutputStream::try_from_device(&virtual_device.unwrap()).unwrap();
 
-    let mut referential = referential::Referential::new();
+    let mut referential = Referential::new();
     referential.init(String::from("pages"));
 
     if referential.get_nb_pages() == 0 {
@@ -134,7 +134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let current_page: AtomicU8 = AtomicU8::new(0);
-    let mut page = referential.get_page(0).unwrap().clone();
+    let page = referential.get_page(0).unwrap().clone();
     let app_state = Arc::new(Mutex::new(AppState {
         page
     }));
@@ -214,21 +214,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 continue;
             }
             current_page.store(0, Ordering::Relaxed);
-            let page = referential.get_page(current_page.load(Ordering::Relaxed))
-                .unwrap().clone();
-            let app_state = Arc::clone(&app_state);
-            app_state.lock().unwrap().set_page(page.clone());
 
-            let thread_tx_midi = tx_midi.clone();
-            // Clear the grid and right side
-            clear_grid(&thread_tx_midi, 89);
-
-            for note in page.get_notes().iter() {
-                thread_tx_midi.send((*note, false)).unwrap();
-            }
-
-            thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
-            signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
+            refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, false);
             continue;
         }
         if note.note_id == LAST_PAGE_NOTE {
@@ -236,40 +223,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 continue;
             }
             current_page.store(referential.get_nb_pages() - 1, Ordering::Relaxed);
-            let page = referential.get_page(current_page.load(Ordering::Relaxed))
-                .unwrap().clone();
-            let app_state = Arc::clone(&app_state);
-            app_state.lock().unwrap().set_page(page.clone());
 
-            let thread_tx_midi = tx_midi.clone();
-            // Clear the grid and right side
-            clear_grid(&thread_tx_midi, 89);
-
-            for note in page.get_notes().iter() {
-                thread_tx_midi.send((*note, false)).unwrap();
-            }
-
-            thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
-            signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
+            refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, false);
             continue;
         }
         if note.note_id == PREV_PAGE_NOTE {
-            if current_page.load(Ordering::Relaxed) > 0 {
-                current_page.fetch_sub(1, Ordering::Relaxed);
-                let page = referential.get_page(current_page.load(Ordering::Relaxed))
-                    .unwrap().clone();
-                let app_state = Arc::clone(&app_state);
-                app_state.lock().unwrap().set_page(page.clone());
-
-                let thread_tx_midi = tx_midi.clone();
-                clear_grid(&thread_tx_midi, 89);
-
-                for note in page.get_notes().iter() {
-                    thread_tx_midi.send((*note, false)).unwrap();
-                }
-                thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
-                signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
+            if current_page.load(Ordering::Relaxed) == 0 {
+                continue;
             }
+            current_page.fetch_sub(1, Ordering::Relaxed);
+
+            refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, false);
             continue;
         }
         if note.note_id == NEXT_PAGE_NOTE {
@@ -277,24 +241,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 continue;
             }
             current_page.fetch_add(1, Ordering::Relaxed);
-            page = referential.get_page(current_page.load(Ordering::Relaxed))
-                .unwrap().clone();
-            let app_state = Arc::clone(&app_state);
-            app_state.lock().unwrap().set_page(page.clone());
 
-            let thread_tx_midi = tx_midi.clone();
-            // Clear the grid and right side
-            for note in 1..89 {
-                let note = Note::new(note, "", 0);
-                thread_tx_midi.send((note, false)).unwrap();
-            }
-
-            for note in page.get_notes().iter() {
-                thread_tx_midi.send((*note, false)).unwrap();
-            }
-            thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
-            signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
-
+            refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, false);
             continue;
         }
         if note.note_id == STOP_NOTE {
@@ -302,24 +250,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 sink.stop();
             }
             sinks = vec![];
-
-            let thread_tx_midi = tx_midi.clone();
-            // Clear the grid and right side
-            for note in 1..89 {
-                let note = Note::new(note, "", 0);
-                thread_tx_midi.send((note, false)).unwrap();
-            }
-
-            let app_state = Arc::clone(&app_state);
-            let state = app_state.lock().unwrap();
-            let page = state.get_page().clone();
-            for note in page.get_notes().iter() {
-                thread_tx_midi.send((*note, false)).unwrap();
-            }
-            thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
-
-            signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
-
             continue;
         }
         if BOOKMARK_NOTES.contains(&note.note_id) {
@@ -330,37 +260,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             current_bookmark = BOOKMARK_NOTES[index];
             // Get the bookmark parameter from Config based on index
             let bookmark_path = config.get_bookmark(index).expect("No path found for bookmark");
-
-            let page_number = current_page.load(Ordering::Relaxed);
-            current_page.fetch_sub(page_number, Ordering::Relaxed);
-
             referential.init(bookmark_path);
-            page = referential.get_page(current_page.load(Ordering::Relaxed))
-                .unwrap().clone();
-            let app_state = Arc::clone(&app_state);
-            app_state.lock().unwrap().set_page(page.clone());
+            current_page.store(0, Ordering::Relaxed);
 
-            let thread_tx_midi = tx_midi.clone();
-            // Clear the grid and right side
-            for note in 1..99 {
-                let note = Note::new(note, "", 0);
-                thread_tx_midi.send((note, false)).unwrap();
-            }
-
-            for note in page.get_notes().iter() {
-                thread_tx_midi.send((*note, false)).unwrap();
-            }
-
-            if referential.get_nb_pages() > 1 {
-                thread_tx_midi.send((Note::new(FIRST_PAGE_NOTE, "", WHITE), false)).unwrap();
-                thread_tx_midi.send((Note::new(LAST_PAGE_NOTE, "", WHITE), false)).unwrap();
-                thread_tx_midi.send((Note::new(PREV_PAGE_NOTE, "", WHITE), false)).unwrap();
-                thread_tx_midi.send((Note::new(NEXT_PAGE_NOTE, "", WHITE), false)).unwrap();
-            }
-            thread_tx_midi.send((Note::new(END_SESSION_NOTE, "", WHITE), false)).unwrap();
-            thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
-            signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
-
+            refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, true);
             continue;
         }
         let file = BufReader::new(File::open(Path::new(note.path)).unwrap());
@@ -390,6 +293,34 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+fn refresh_grid(config: &Config, current_bookmark: &mut u8, referential: &mut Referential, current_page: &AtomicU8, app_state: &Arc<Mutex<AppState>>, tx_midi: &Sender<NoteState>, with_header: bool) {
+    let page = referential.get_page(current_page.load(Ordering::Relaxed))
+        .unwrap().clone();
+    let app_state = Arc::clone(app_state);
+    app_state.lock().unwrap().set_page(page.clone());
+
+    let thread_tx_midi = tx_midi.clone();
+    // Clear the grid and right side
+    clear_grid(&thread_tx_midi, if with_header { 99 } else { 89 });
+
+    for note in page.get_notes().iter() {
+        thread_tx_midi.send((*note, false)).unwrap();
+    }
+
+    if with_header {
+        if referential.get_nb_pages() > 1 {
+            thread_tx_midi.send((Note::new(FIRST_PAGE_NOTE, "", WHITE), false)).unwrap();
+            thread_tx_midi.send((Note::new(LAST_PAGE_NOTE, "", WHITE), false)).unwrap();
+            thread_tx_midi.send((Note::new(PREV_PAGE_NOTE, "", WHITE), false)).unwrap();
+            thread_tx_midi.send((Note::new(NEXT_PAGE_NOTE, "", WHITE), false)).unwrap();
+        }
+        thread_tx_midi.send((Note::new(END_SESSION_NOTE, "", WHITE), false)).unwrap();
+    }
+
+    thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
+    signal_bookmarks(config, current_bookmark, thread_tx_midi);
 }
 
 fn clear_grid(thread_tx_midi: &Sender<NoteState>, max_note: u8) {

@@ -23,10 +23,14 @@ mod config;
 mod referential;
 mod colors;
 
+// Exclusive notes from Launchpad Mini Mk3, change them at your convenience.
+const FIRST_PAGE_NOTE: u8 = 91;
+const LAST_PAGE_NOTE: u8 = 92;
 const PREV_PAGE_NOTE: u8 = 93;
 const NEXT_PAGE_NOTE: u8 = 94;
 const END_SESSION_NOTE: u8 = 95;
 const STOP_NOTE: u8 = 19;
+const SYSTEM_NOTES: [u8; 6] = [FIRST_PAGE_NOTE, LAST_PAGE_NOTE, PREV_PAGE_NOTE, NEXT_PAGE_NOTE, END_SESSION_NOTE, STOP_NOTE];
 const BOOKMARK_NOTES: [u8; 7] = [89, 79, 69, 59, 49, 39, 29];
 
 type NoteState = (Note, bool);
@@ -97,6 +101,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     let midi_out_port = potential_out_port.as_ref().unwrap();
     let mut conn_out = midi_out.connect(midi_out_port, "midir-read-output")?;
 
+    let host = cpal::default_host();
+    let output_device = host.default_output_device().expect("Failed to get default output device");
+    let (_stream, main_handle) = rodio::OutputStream::try_from_device(&output_device).unwrap();
+
+    if is_debug_enabled {
+        println!("Available virtual devices:");
+        for device in host.output_devices().unwrap() {
+            println!("\t- {}", device.name().unwrap());
+        }
+    }
+
+    let mut virtual_device: Option<Device> = None;
+    let expected_out_device_name = config.get_virtual_device().unwrap();
+    for device in host.output_devices().unwrap() {
+        if device.name().unwrap() == expected_out_device_name.as_str() {
+            virtual_device = Some(device);
+        }
+    }
+    if virtual_device.is_none() {
+        println!("No virtual device found");
+        return Ok(());
+    }
+    let (_stream, virtual_handle) = rodio::OutputStream::try_from_device(&virtual_device.unwrap()).unwrap();
+
     let mut referential = referential::Referential::new();
     referential.init(String::from("pages"));
 
@@ -117,12 +145,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if referential.get_nb_pages() > 1 {
+        conn_out.send(&[144, FIRST_PAGE_NOTE, WHITE]).unwrap();
+        conn_out.send(&[144, LAST_PAGE_NOTE, WHITE]).unwrap();
         conn_out.send(&[144, PREV_PAGE_NOTE, WHITE]).unwrap();
         conn_out.send(&[144, NEXT_PAGE_NOTE, WHITE]).unwrap();
     }
 
-    let thread_app_state = app_state.clone();
-    for note in thread_app_state.lock().unwrap().page.get_notes().iter() {
+    for note in app_state.lock().unwrap().page.get_notes().iter() {
         conn_out.send(&[144, note.note_id, note.color]).unwrap();
     }
     conn_out.send(&[144, END_SESSION_NOTE, WHITE]).unwrap();
@@ -148,6 +177,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let thread_app_state = Arc::clone(&app_state);
+    // Listen to the midi inputs
     let _conn_in = midi_in.connect(midi_in_port, "midir-read-input", move |_stamp, message, _| {
         let is_on = message[2] == 127;
         let thread_tx = tx.clone();
@@ -158,60 +188,70 @@ fn main() -> Result<(), Box<dyn Error>> {
             if is_debug_enabled {
                 println!("{:?}", message);
             }
-            if message[1] == PREV_PAGE_NOTE {
-                thread_tx.send(Note::new(PREV_PAGE_NOTE, "", 0)).unwrap();
-            }
-            if message[1] == NEXT_PAGE_NOTE {
-                thread_tx.send(Note::new(NEXT_PAGE_NOTE, "", 0)).unwrap();
-            }
-            if message[1] == END_SESSION_NOTE {
-                thread_tx.send(Note::new(END_SESSION_NOTE, "", 0)).unwrap();
-            }
-            if message[1] == STOP_NOTE {
-                thread_tx.send(Note::new(STOP_NOTE, "", 0)).unwrap();
-            }
-            if BOOKMARK_NOTES.contains(&message[1]) {
+            if SYSTEM_NOTES.contains(&message[1]) || BOOKMARK_NOTES.contains(&message[1]) {
                 thread_tx.send(Note::new(message[1], "", 0)).unwrap();
             }
             if let Some(note) = page.get_note(message[1]) {
-                thread::spawn(move || {
-                    thread_tx.send(note).unwrap();
-                });
+                thread_tx.send(note).unwrap();
             }
         }
     }, ())?;
 
-    let host = cpal::default_host();
-    let output_device = host.default_output_device().expect("Failed to get default output device");
-    // let input_device = host.default_input_device().expect("Failed to get default input device");
-    let (_stream, main_handle) = rodio::OutputStream::try_from_device(&output_device).unwrap();
-
-    let mut virtual_device: Option<Device> = None;
-    let expected_out_device_name = config.get_virtual_device().unwrap();
-    for device in host.output_devices().unwrap() {
-        if device.name().unwrap() == expected_out_device_name.as_str() {
-            virtual_device = Some(device);
-        }
-    }
-    if virtual_device.is_none() {
-        println!("No virtual device found");
-        return Ok(());
-    }
-    let (_stream, virtual_handle) = rodio::OutputStream::try_from_device(&virtual_device.unwrap()).unwrap();
 
     let mut sinks: Vec<Sink> = vec![];
 
-    // Loop to handle the playback
+    // Loop to handle the commands
     for note in rx {
         if note.note_id == END_SESSION_NOTE {
             // Close everything
             let thread_tx_midi = tx_midi;
-            for note in 1..99 {
-                let note = Note::new(note, "", 0);
-                thread_tx_midi.send((note, false)).unwrap();
-            }
+            clear_grid(&thread_tx_midi, 99);
             thread::sleep(Duration::from_millis(100));
             break;
+        }
+        if note.note_id == FIRST_PAGE_NOTE {
+            if current_page.load(Ordering::Relaxed) == 0 {
+                continue;
+            }
+            current_page.store(0, Ordering::Relaxed);
+            let page = referential.get_page(current_page.load(Ordering::Relaxed))
+                .unwrap().clone();
+            let app_state = Arc::clone(&app_state);
+            app_state.lock().unwrap().set_page(page.clone());
+
+            let thread_tx_midi = tx_midi.clone();
+            // Clear the grid and right side
+            clear_grid(&thread_tx_midi, 89);
+
+            for note in page.get_notes().iter() {
+                thread_tx_midi.send((*note, false)).unwrap();
+            }
+
+            thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
+            signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
+            continue;
+        }
+        if note.note_id == LAST_PAGE_NOTE {
+            if current_page.load(Ordering::Relaxed) == referential.get_nb_pages() - 1 {
+                continue;
+            }
+            current_page.store(referential.get_nb_pages() - 1, Ordering::Relaxed);
+            let page = referential.get_page(current_page.load(Ordering::Relaxed))
+                .unwrap().clone();
+            let app_state = Arc::clone(&app_state);
+            app_state.lock().unwrap().set_page(page.clone());
+
+            let thread_tx_midi = tx_midi.clone();
+            // Clear the grid and right side
+            clear_grid(&thread_tx_midi, 89);
+
+            for note in page.get_notes().iter() {
+                thread_tx_midi.send((*note, false)).unwrap();
+            }
+
+            thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
+            signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
+            continue;
         }
         if note.note_id == PREV_PAGE_NOTE {
             if current_page.load(Ordering::Relaxed) > 0 {
@@ -222,26 +262,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 app_state.lock().unwrap().set_page(page.clone());
 
                 let thread_tx_midi = tx_midi.clone();
-                // Clear the grid and right side
-                for note in 1..89 {
-                    let note = Note::new(note, "", 0);
-                    thread_tx_midi.send((note, false)).unwrap();
-                }
+                clear_grid(&thread_tx_midi, 89);
 
                 for note in page.get_notes().iter() {
                     thread_tx_midi.send((*note, false)).unwrap();
                 }
                 thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
-                for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
-                    if !config.bookmark_exists(i) {
-                        continue;
-                    }
-                    if current_bookmark == *bookmark_note {
-                        thread_tx_midi.send((Note::new(*bookmark_note, "", GREEN), false)).unwrap();
-                    } else {
-                        thread_tx_midi.send((Note::new(*bookmark_note, "", WHITE), false)).unwrap();
-                    }
-                }
+                signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
             }
             continue;
         }
@@ -250,8 +277,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 continue;
             }
             current_page.fetch_add(1, Ordering::Relaxed);
-            // let thread_page = Arc::clone(&global_page);
-            // let mut page = thread_page.lock().unwrap();
             page = referential.get_page(current_page.load(Ordering::Relaxed))
                 .unwrap().clone();
             let app_state = Arc::clone(&app_state);
@@ -268,16 +293,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 thread_tx_midi.send((*note, false)).unwrap();
             }
             thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
-            for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
-                if !config.bookmark_exists(i) {
-                    continue;
-                }
-                if current_bookmark == *bookmark_note {
-                    thread_tx_midi.send((Note::new(*bookmark_note, "", GREEN), false)).unwrap();
-                } else {
-                    thread_tx_midi.send((Note::new(*bookmark_note, "", WHITE), false)).unwrap();
-                }
-            }
+            signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
 
             continue;
         }
@@ -302,16 +318,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
 
-            for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
-                if !config.bookmark_exists(i) {
-                    continue;
-                }
-                if current_bookmark == *bookmark_note {
-                    thread_tx_midi.send((Note::new(*bookmark_note, "", GREEN), false)).unwrap();
-                } else {
-                    thread_tx_midi.send((Note::new(*bookmark_note, "", WHITE), false)).unwrap();
-                }
-            }
+            signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
 
             continue;
         }
@@ -345,21 +352,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
 
             if referential.get_nb_pages() > 1 {
+                thread_tx_midi.send((Note::new(FIRST_PAGE_NOTE, "", WHITE), false)).unwrap();
+                thread_tx_midi.send((Note::new(LAST_PAGE_NOTE, "", WHITE), false)).unwrap();
                 thread_tx_midi.send((Note::new(PREV_PAGE_NOTE, "", WHITE), false)).unwrap();
                 thread_tx_midi.send((Note::new(NEXT_PAGE_NOTE, "", WHITE), false)).unwrap();
             }
             thread_tx_midi.send((Note::new(END_SESSION_NOTE, "", WHITE), false)).unwrap();
             thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
-            for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
-                if !config.bookmark_exists(i) {
-                    continue;
-                }
-                if current_bookmark == *bookmark_note {
-                    thread_tx_midi.send((Note::new(*bookmark_note, "", GREEN), false)).unwrap();
-                } else {
-                    thread_tx_midi.send((Note::new(*bookmark_note, "", WHITE), false)).unwrap();
-                }
-            }
+            signal_bookmarks(&config, &mut current_bookmark, thread_tx_midi);
 
             continue;
         }
@@ -390,4 +390,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+fn clear_grid(thread_tx_midi: &Sender<NoteState>, max_note: u8) {
+    for note in 1..max_note {
+        let note = Note::new(note, "", 0);
+        thread_tx_midi.send((note, false)).unwrap();
+    }
+}
+
+fn signal_bookmarks(config: &Config, current_bookmark: &mut u8, thread_tx_midi: Sender<NoteState>) {
+    for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
+        if !config.bookmark_exists(i) {
+            continue;
+        }
+        if *current_bookmark == *bookmark_note {
+            thread_tx_midi.send((Note::new(*bookmark_note, "", GREEN), false)).unwrap();
+        } else {
+            thread_tx_midi.send((Note::new(*bookmark_note, "", WHITE), false)).unwrap();
+        }
+    }
 }

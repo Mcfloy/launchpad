@@ -1,0 +1,11 @@
+midi_in_device: MIDIIN2 (LPMiniMK3 MIDI)
+midi_out_device: MIDIOUT2 (LPMiniMK3 MIDI)
+virtual_device: CABLE Input (VB-Audio Virtual Cable)
+bookmark_1: pages
+bookmark_2: pages/palmashow
+bookmark_3:
+bookmark_4:
+bookmark_5:
+bookmark_6:
+bookmark_7:
+debug_mode: true

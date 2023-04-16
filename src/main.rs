@@ -2,26 +2,27 @@ extern crate core;
 
 use std::error::Error;
 use std::fs::File;
-use std::io::{BufReader};
+use std::io::BufReader;
 use std::path::Path;
 use std::sync::{Arc, mpsc, Mutex};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::Duration;
-use config_file::FromConfigFile;
 
+use config_file::FromConfigFile;
 use cpal::Device;
 use cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Sink, Source};
 
-use crate::colors::{GREEN, WHITE};
 use crate::config::Config;
 use crate::referential::{Note, Page, Referential};
 
 mod config;
 mod referential;
-mod colors;
+
+const WHITE_COLOR: u8 = 3;
+const GREEN_COLOR: u8 = 87;
 
 // Exclusive notes from Launchpad Mini Mk3, change them at your convenience.
 const FIRST_PAGE_NOTE: u8 = 91;
@@ -139,27 +140,26 @@ fn main() -> Result<(), Box<dyn Error>> {
         page
     }));
 
-
     for note in 1..89 {
         conn_out.send(&[144, note, 0]).unwrap();
     }
 
     if referential.get_nb_pages() > 1 {
-        conn_out.send(&[144, FIRST_PAGE_NOTE, WHITE]).unwrap();
-        conn_out.send(&[144, LAST_PAGE_NOTE, WHITE]).unwrap();
-        conn_out.send(&[144, PREV_PAGE_NOTE, WHITE]).unwrap();
-        conn_out.send(&[144, NEXT_PAGE_NOTE, WHITE]).unwrap();
+        conn_out.send(&[144, FIRST_PAGE_NOTE, WHITE_COLOR]).unwrap();
+        conn_out.send(&[144, LAST_PAGE_NOTE, WHITE_COLOR]).unwrap();
+        conn_out.send(&[144, PREV_PAGE_NOTE, WHITE_COLOR]).unwrap();
+        conn_out.send(&[144, NEXT_PAGE_NOTE, WHITE_COLOR]).unwrap();
     }
 
     for note in app_state.lock().unwrap().page.get_notes().iter() {
         conn_out.send(&[144, note.note_id, note.color]).unwrap();
     }
-    conn_out.send(&[144, END_SESSION_NOTE, WHITE]).unwrap();
-    conn_out.send(&[144, STOP_NOTE, WHITE]).unwrap();
+    conn_out.send(&[144, END_SESSION_NOTE, WHITE_COLOR]).unwrap();
+    conn_out.send(&[144, STOP_NOTE, WHITE_COLOR]).unwrap();
 
     for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
         if config.bookmark_exists(i) {
-            conn_out.send(&[144, *bookmark_note, WHITE]).unwrap();
+            conn_out.send(&[144, *bookmark_note, WHITE_COLOR]).unwrap();
         }
     }
 
@@ -170,7 +170,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     thread::spawn(move || {
         for event in rx_midi {
             let channel = if event.1 { 145 } else { 144 };
-            let color = if event.1 { WHITE } else { event.0.color };
+            let color = if event.1 { WHITE_COLOR } else { event.0.color };
             let note = event.0;
             conn_out.send(&[channel, note.note_id, color]).unwrap();
         }
@@ -196,7 +196,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }, ())?;
-
 
     let mut sinks: Vec<Sink> = vec![];
 
@@ -311,15 +310,15 @@ fn refresh_grid(config: &Config, current_bookmark: &mut u8, referential: &mut Re
 
     if with_header {
         if referential.get_nb_pages() > 1 {
-            thread_tx_midi.send((Note::new(FIRST_PAGE_NOTE, "", WHITE), false)).unwrap();
-            thread_tx_midi.send((Note::new(LAST_PAGE_NOTE, "", WHITE), false)).unwrap();
-            thread_tx_midi.send((Note::new(PREV_PAGE_NOTE, "", WHITE), false)).unwrap();
-            thread_tx_midi.send((Note::new(NEXT_PAGE_NOTE, "", WHITE), false)).unwrap();
+            thread_tx_midi.send((Note::new(FIRST_PAGE_NOTE, "", WHITE_COLOR), false)).unwrap();
+            thread_tx_midi.send((Note::new(LAST_PAGE_NOTE, "", WHITE_COLOR), false)).unwrap();
+            thread_tx_midi.send((Note::new(PREV_PAGE_NOTE, "", WHITE_COLOR), false)).unwrap();
+            thread_tx_midi.send((Note::new(NEXT_PAGE_NOTE, "", WHITE_COLOR), false)).unwrap();
         }
-        thread_tx_midi.send((Note::new(END_SESSION_NOTE, "", WHITE), false)).unwrap();
+        thread_tx_midi.send((Note::new(END_SESSION_NOTE, "", WHITE_COLOR), false)).unwrap();
     }
 
-    thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE), false)).unwrap();
+    thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE_COLOR), false)).unwrap();
     signal_bookmarks(config, current_bookmark, thread_tx_midi);
 }
 
@@ -336,9 +335,9 @@ fn signal_bookmarks(config: &Config, current_bookmark: &mut u8, thread_tx_midi: 
             continue;
         }
         if *current_bookmark == *bookmark_note {
-            thread_tx_midi.send((Note::new(*bookmark_note, "", GREEN), false)).unwrap();
+            thread_tx_midi.send((Note::new(*bookmark_note, "", GREEN_COLOR), false)).unwrap();
         } else {
-            thread_tx_midi.send((Note::new(*bookmark_note, "", WHITE), false)).unwrap();
+            thread_tx_midi.send((Note::new(*bookmark_note, "", WHITE_COLOR), false)).unwrap();
         }
     }
 }

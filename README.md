@@ -40,7 +40,7 @@ The bookmarks can be used to categorize your pages.
 
 ### Pages
 
-A page is a file containing the configuration of the notes that can be played on the soundpad.
+A page is a file containing the configuration of the notes that can be played on the sound-pad.
 Below is an example on how to configure a page.
 
 The application will list the files and create the pages based on the order of the files.
@@ -58,3 +58,26 @@ The third column is the color of the note, from 0 to 127.
 
 ## Usage
 Once you've configured the page and the config file, you can launch the binary and start playing sounds.
+
+### Playing sounds
+When you press a note, the corresponding sound will be played on both the default output device and the virtual device.
+We recommend not using the same device for both, as it will cause a feedback loop.
+
+The configuration is set to use [Virtual Audio Cable](https://vb-audio.com/Cable/) as the virtual device,
+sending to the Cable Input device.
+On the other side (e.g. Discord) you should configure it to Cable Output.
+
+### Merge your microphone with the virtual device (on Windows)
+
+Select the audio properties of your mic on Windows (with the old UI) and in the "Listen"
+tab, check the "Listen this device" checkbox.
+Then select the virtual device as the "Listen to this device"
+and you will be able to merge your microphone with the virtual device.
+
+This process can be achieved with other software or on other OS, but this is the simplest way I've found.
+
+### Hold to play mode
+
+The hold_to_play mode allows you to play a sound by holding it, and stop it by releasing it.
+You can still play multiple sounds at the same time.
+The "blinking" status is disabled in this mode.

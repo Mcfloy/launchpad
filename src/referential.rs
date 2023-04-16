@@ -1,4 +1,4 @@
-use std::{env, fs};
+use std::fs;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Note {

@@ -1,5 +1,7 @@
+#![feature(let_chains)]
 extern crate core;
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
@@ -54,6 +56,7 @@ impl AppState {
 fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::from_config_file("config.yaml").unwrap();
     let is_debug_enabled = config.is_debug_enabled();
+    let is_hold_to_play_enabled = config.is_hold_to_play_enabled();
 
     let mut midi_in = midir::MidiInput::new("midir reading input")?;
     midi_in.ignore(midir::Ignore::All);
@@ -163,7 +166,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let (tx, rx): (Sender<Note>, Receiver<Note>) = mpsc::channel();
+    let (tx_on, rx_on): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
     let (tx_midi, rx_midi): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
 
     // Thread to manage the midi LEDs
@@ -177,30 +180,42 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let thread_app_state = Arc::clone(&app_state);
+    let mut sinks: HashMap<u8, (Sink, Sink)> = HashMap::new();
     // Listen to the midi inputs
     let _conn_in = midi_in.connect(midi_in_port, "midir-read-input", move |_stamp, message, _| {
         let is_on = message[2] == 127;
-        let thread_tx = tx.clone();
         let message = [message[0], message[1]];
         let page = thread_app_state.lock().unwrap().get_page().clone();
 
         if is_on {
             if is_debug_enabled {
-                println!("{:?}", message);
+                println!("Pressed {:?}", message);
             }
+            let thread_tx = tx_on.clone();
             if SYSTEM_NOTES.contains(&message[1]) || BOOKMARK_NOTES.contains(&message[1]) {
-                thread_tx.send(Note::new(message[1], "", 0)).unwrap();
+                thread_tx.send((Note::new(message[1], "", 0), is_on)).unwrap();
             }
             if let Some(note) = page.get_note(message[1]) {
-                thread_tx.send(note).unwrap();
+                thread_tx.send((note, is_on)).unwrap();
+            }
+        } else if is_hold_to_play_enabled {
+            let thread_tx = tx_on.clone();
+            if let Some(note) = page.get_note(message[1]) {
+                thread_tx.send((note, is_on)).unwrap();
             }
         }
     }, ())?;
 
-    let mut sinks: Vec<Sink> = vec![];
 
     // Loop to handle the commands
-    for note in rx {
+    for (note, is_on) in rx_on {
+        if !is_on && is_hold_to_play_enabled {
+            if let Some((audio_sink, virtual_sink)) = sinks.remove(&note.note_id) {
+                audio_sink.stop();
+                virtual_sink.stop();
+            }
+            continue;
+        }
         if note.note_id == END_SESSION_NOTE {
             // Close everything
             let thread_tx_midi = tx_midi;
@@ -245,10 +260,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             continue;
         }
         if note.note_id == STOP_NOTE {
-            for sink in sinks.iter() {
-                sink.stop();
+            for (audio_sink, virtual_sink) in sinks.values() {
+                audio_sink.stop();
+                virtual_sink.stop();
             }
-            sinks = vec![];
+            sinks.clear();
             continue;
         }
         if BOOKMARK_NOTES.contains(&note.note_id) {
@@ -268,7 +284,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let file = BufReader::new(File::open(Path::new(note.path)).unwrap());
         let source = rodio::Decoder::new(file).unwrap()
             .amplify(0.25);
-        if let Some(duration) = source.total_duration() {
+        if !is_hold_to_play_enabled && let Some(duration) = source.total_duration() {
             // Light on the note and light off after the duration
             let thread_tx_midi = tx_midi.clone();
             thread_tx_midi.send((note, true)).unwrap();
@@ -278,17 +294,19 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
         }
 
-        let sink = Sink::try_new(&main_handle).unwrap();
-        sink.append(source);
-        sinks.push(sink);
+        {
+            let audio_sink = Sink::try_new(&main_handle).unwrap();
+            audio_sink.append(source);
 
-        let file = BufReader::new(File::open(Path::new(note.path)).unwrap());
-        let source = rodio::Decoder::new(file).unwrap()
-            .amplify(0.1);
+            let file = BufReader::new(File::open(Path::new(note.path)).unwrap());
+            let source = rodio::Decoder::new(file).unwrap()
+                .amplify(0.1);
 
-        let sink = Sink::try_new(&virtual_handle).unwrap();
-        sink.append(source);
-        sinks.push(sink);
+            let virtual_sink = Sink::try_new(&virtual_handle).unwrap();
+            virtual_sink.append(source);
+
+            sinks.insert(note.note_id, (audio_sink, virtual_sink));
+        }
     }
 
     Ok(())

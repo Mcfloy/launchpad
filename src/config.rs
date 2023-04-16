@@ -13,25 +13,10 @@ pub struct Config {
     bookmark_6: Option<String>,
     bookmark_7: Option<String>,
     debug_mode: bool,
+    hold_to_play: bool,
 }
 
 impl Config {
-    pub fn new() -> Self {
-        Config {
-            midi_in_device: None,
-            midi_out_device: None,
-            virtual_device: None,
-            bookmark_1: None,
-            bookmark_2: None,
-            bookmark_3: None,
-            bookmark_4: None,
-            bookmark_5: None,
-            bookmark_6: None,
-            bookmark_7: None,
-            debug_mode: false,
-        }
-    }
-
     pub fn get_midi_in_device(&self) -> Option<String> {
         self.midi_in_device.clone()
     }
@@ -72,5 +57,9 @@ impl Config {
 
     pub fn is_debug_enabled(&self) -> bool {
         self.debug_mode
+    }
+
+    pub fn is_hold_to_play_enabled(&self) -> bool {
+        self.hold_to_play
     }
 }

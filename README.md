@@ -81,3 +81,11 @@ This process can be achieved with other software or on other OS, but this is the
 The hold_to_play mode allows you to play a sound by holding it, and stop it by releasing it.
 You can still play multiple sounds at the same time.
 The "blinking" status is disabled in this mode.
+
+## Using on other midi devices
+
+Theoretically, the application should work on any midi device not limited to the launchpad,
+but some modification might be done in the code to make it compatible:
+- The note constants might need to be changed, activate the debug mode will help you retrieve them.
+- The colors might not be compatible, in that case you will need to change the message sent by `thread_tx_midi`.
+- The `clear_grid` function might need to be changed to extend to larger grids.

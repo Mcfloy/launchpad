@@ -81,7 +81,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let midi_in_port = potential_in_port.as_ref().unwrap();
+    let midi_in_port = potential_in_port.as_ref()
+        .expect("No midi input port found, have you plugged your midi device ?");
 
     let midi_out = midir::MidiOutput::new("midir reading output")?;
 
@@ -102,12 +103,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let midi_out_port = potential_out_port.as_ref().unwrap();
+    let midi_out_port = potential_out_port.as_ref()
+        .expect("No midi output port found, have you plugged your midi device ?");
+
     let mut conn_out = midi_out.connect(midi_out_port, "midir-read-output")?;
 
     let host = cpal::default_host();
     let output_device = host.default_output_device().expect("Failed to get default output device");
-    let (_stream, main_handle) = rodio::OutputStream::try_from_device(&output_device).unwrap();
+    let (_stream, main_handle) = rodio::OutputStream::try_from_device(&output_device)
+        .expect("Failed to open default output device.");
 
     if is_debug_enabled {
         println!("Available virtual devices:");
@@ -143,31 +147,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         page
     }));
 
-    for note in 1..89 {
-        conn_out.send(&[144, note, 0]).unwrap();
-    }
-
-    if referential.get_nb_pages() > 1 {
-        conn_out.send(&[144, FIRST_PAGE_NOTE, WHITE_COLOR]).unwrap();
-        conn_out.send(&[144, LAST_PAGE_NOTE, WHITE_COLOR]).unwrap();
-        conn_out.send(&[144, PREV_PAGE_NOTE, WHITE_COLOR]).unwrap();
-        conn_out.send(&[144, NEXT_PAGE_NOTE, WHITE_COLOR]).unwrap();
-    }
-
-    for note in app_state.lock().unwrap().page.get_notes().iter() {
-        conn_out.send(&[144, note.note_id, note.color]).unwrap();
-    }
-    conn_out.send(&[144, END_SESSION_NOTE, WHITE_COLOR]).unwrap();
-    conn_out.send(&[144, STOP_NOTE, WHITE_COLOR]).unwrap();
-
-    for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
-        if config.bookmark_exists(i) {
-            conn_out.send(&[144, *bookmark_note, WHITE_COLOR]).unwrap();
-        }
-    }
-
     let (tx_on, rx_on): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
     let (tx_midi, rx_midi): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
+
+    refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, true);
 
     // Thread to manage the midi LEDs
     thread::spawn(move || {

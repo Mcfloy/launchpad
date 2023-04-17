@@ -14,6 +14,18 @@ You will need to configure a config file and also install a software to provide 
 
 In my case, I used Virtual Audio Cable, but you can use any other software that provides an output device.
 
+### Building from the source code
+
+You will need to use the nightly toolchain for Rust, as the application uses the `let_chains` feature.
+
+```shell
+git clone https://github.com/Mcfloy/launchpad.git
+cd launchpad
+rustup toolchain install nightly  # Project uses let_chains feature
+rustup override set nightly
+cargo build --release
+```
+
 ### Config file
 You will need to configure the config.yaml file that is located in the same folder as the binary.
 

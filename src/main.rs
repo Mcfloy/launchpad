@@ -152,6 +152,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, true);
 
+    // Activate programmer mode
+    conn_out.send(&[240, 0, 32, 41, 2 ,13, 14, 1, 247]).unwrap();
+    println!("Programmer mode activated");
+
     // Thread to manage the midi LEDs
     thread::spawn(move || {
         for event in rx_midi {

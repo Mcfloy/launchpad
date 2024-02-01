@@ -153,8 +153,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, true);
 
     // Activate programmer mode
-    conn_out.send(&[240, 0, 32, 41, 2 ,13, 14, 1, 247]).unwrap();
-    println!("Programmer mode activated");
+    if midi_in_device_name.contains("LPMiniMK3") {
+        println!("Programmer mode activated");
+        conn_out.send(&[240, 0, 32, 41, 2, 13, 14, 1, 247]).unwrap();
+    } else if midi_in_device_name.contains("LPX") {
+        conn_out.send(&[240, 0, 32, 41, 2, 12, 127, 247]).unwrap();
+    } else {
+        println!("No programmer mode available for this device. Please create an issue on the repository.");
+    }
 
     // Thread to manage the midi LEDs
     thread::spawn(move || {

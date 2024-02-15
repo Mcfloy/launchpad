@@ -330,7 +330,7 @@ fn refresh_grid(config: &Config, current_bookmark: &mut u8, referential: &mut Re
 
 fn clear_grid(thread_tx_midi: &Sender<NoteState>, max_note: u8) {
   for note in 1..max_note {
-    let note = Note::new(note, "", 0);
+    let note = Note::off(note);
     thread_tx_midi.send((note, false)).unwrap();
   }
 }
@@ -341,9 +341,9 @@ fn signal_bookmarks(config: &Config, current_bookmark: &mut u8, thread_tx_midi: 
       continue;
     }
     if *current_bookmark == *bookmark_note {
-      thread_tx_midi.send((Note::new(*bookmark_note, "", GREEN_COLOR), false)).unwrap();
+      thread_tx_midi.send((Note::green(*bookmark_note), false)).unwrap();
     } else {
-      thread_tx_midi.send((Note::new(*bookmark_note, "", WHITE_COLOR), false)).unwrap();
+      thread_tx_midi.send((Note::white(*bookmark_note), false)).unwrap();
     }
   }
 }

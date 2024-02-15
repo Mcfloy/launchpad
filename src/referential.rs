@@ -1,4 +1,5 @@
 use std::fs;
+use crate::{GREEN_COLOR, WHITE_COLOR};
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Note {
@@ -13,6 +14,30 @@ impl Note {
             note_id,
             path,
             color,
+        }
+    }
+
+    pub fn green(note_id: u8) -> Self {
+        Note {
+            note_id,
+            path: "",
+            color: GREEN_COLOR,
+        }
+    }
+
+    pub fn white(note_id: u8) -> Self {
+        Note {
+            note_id,
+            path: "",
+            color: WHITE_COLOR,
+        }
+    }
+
+    pub fn off(note_id: u8) -> Self {
+        Note {
+            note_id,
+            path: "",
+            color: 0,
         }
     }
 }

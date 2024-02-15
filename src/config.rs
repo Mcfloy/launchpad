@@ -4,6 +4,7 @@ use serde::Deserialize;
 pub struct Config {
     midi_in_device: Option<String>,
     midi_out_device: Option<String>,
+    output_device: Option<String>,
     virtual_device: Option<String>,
     bookmark_1: Option<String>,
     bookmark_2: Option<String>,
@@ -17,12 +18,18 @@ pub struct Config {
 }
 
 impl Config {
+    // TODO: Create an init function
+
     pub fn get_midi_in_device(&self) -> Option<String> {
         self.midi_in_device.clone()
     }
 
     pub fn get_midi_out_device(&self) -> Option<String> {
         self.midi_out_device.clone()
+    }
+
+    pub fn get_output_device(&self) -> Option<&str> {
+        self.output_device.as_deref()
     }
 
     pub fn get_virtual_device(&self) -> Option<String> {

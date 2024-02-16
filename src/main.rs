@@ -12,7 +12,7 @@ use log::{debug, error};
 use rodio::{Sink};
 
 use crate::config::Config;
-use crate::referential::{Note, Page, Referential};
+use crate::referential::{Note, Referential};
 
 mod config;
 mod referential;
@@ -34,21 +34,6 @@ const BOOKMARK_NOTES: [u8; 7] = [89, 79, 69, 59, 49, 39, 29];
 
 type NoteState = (Note, bool);
 type NoteEvent = (u8, bool);
-
-#[derive(Debug, Clone)]
-struct AppState {
-  pub page: Page,
-}
-
-impl AppState {
-  pub fn get_page(&self) -> &Page {
-    &self.page
-  }
-
-  pub fn set_page(&mut self, page: Page) {
-    self.page = page;
-  }
-}
 
 fn main() -> Result<(), Box<dyn Error>> {
   // TODO: Load the configuration file from config.yaml, if not found generate a default one
@@ -123,21 +108,18 @@ fn main() -> Result<(), Box<dyn Error>> {
   let mut referential = Referential::new();
   referential.init(String::from("pages"));
 
-  if referential.get_nb_pages() == 0 {
+  let referential_mutex = Arc::new(Mutex::new(referential));
+
+  if referential_mutex.lock().unwrap().get_nb_pages() == 0 {
     error!("No pages found");
     return Ok(());
   }
-
-  let page = referential.get_page(0).unwrap().clone();
-  let app_state = Arc::new(Mutex::new(AppState {
-    page
-  }));
 
   let (tx_on, rx_on): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
   let (tx_note, rx_note): (Sender<NoteEvent>, Receiver<NoteEvent>) = mpsc::channel();
   let (tx_midi, rx_midi): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
 
-  refresh_grid(&config, &mut referential, &app_state, &tx_midi, true);
+  refresh_grid(&config, &mut referential_mutex.lock().unwrap(), &tx_midi, true);
 
   // Activate programmer mode
   let midi_in_device_name = config.get_midi_in_device().unwrap();
@@ -160,20 +142,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
   });
 
-  let thread_app_state = Arc::clone(&app_state);
 
+  let referential_clone = referential_mutex.clone();
   // New thread to manage to handle the received events from the midi input
   thread::spawn(move || {
-    let thread_app_state = thread_app_state;
     for event in rx_note {
       // Only handle on note
+      let referential = referential_clone.lock().unwrap();
       if event.1 {
         // Check if the note is a system note
         if SYSTEM_NOTES.contains(&event.0) || BOOKMARK_NOTES.contains(&event.0) {
           tx_on.send((Note::off(event.0), event.1)).unwrap();
         }
-        if let Some(note) = thread_app_state.lock().unwrap().get_page().get_note(event.0) {
-          tx_on.send((note, event.1)).unwrap();
+        if let Some(note) = &referential.get_note(event.0) {
+          tx_on.send((*note, event.1)).unwrap();
         }
       }
     }
@@ -184,6 +166,7 @@ fn main() -> Result<(), Box<dyn Error>> {
   let _conn_in = midi::listen_midi_input(midi_in_device_name, tx_note);
 
   // Loop to handle the commands
+  let referential_clone = referential_mutex.clone();
   for (note, is_on) in rx_on {
     if !is_on && is_hold_to_play_enabled {
       if let Some((audio_sink, virtual_sink)) = sinks.remove(&note.note_id) {
@@ -200,45 +183,45 @@ fn main() -> Result<(), Box<dyn Error>> {
       STOP_NOTE => {
         midi::actions::stop_note(&mut sinks);
         continue;
-      }
-      // TODO: Implement the other notes
+      },
+      FIRST_PAGE_NOTE => {
+        let mut referential = referential_clone.lock().unwrap();
+        referential.first_page();
+
+        refresh_grid(&config, &mut referential, &tx_midi, false);
+      },
+      LAST_PAGE_NOTE => {
+        let mut referential = referential_clone.lock().unwrap();
+        referential.last_page();
+
+        refresh_grid(&config, &mut referential, &tx_midi, false);
+      },
+      PREV_PAGE_NOTE => {
+        let mut referential = referential_clone.lock().unwrap();
+        referential.previous_page();
+
+        refresh_grid(&config, &mut referential, &tx_midi, false);
+      },
+      NEXT_PAGE_NOTE => {
+        let mut referential = referential_clone.lock().unwrap();
+        referential.next_page();
+
+        refresh_grid(&config, &mut referential, &tx_midi, false);
+      },
       _ => {}
     };
-    if note.note_id == FIRST_PAGE_NOTE {
-      referential.first_page();
-
-      refresh_grid(&config, &mut referential, &app_state, &tx_midi, false);
-      continue;
-    }
-    if note.note_id == LAST_PAGE_NOTE {
-      referential.last_page();
-
-      refresh_grid(&config, &mut referential, &app_state, &tx_midi, false);
-      continue;
-    }
-    if note.note_id == PREV_PAGE_NOTE {
-      referential.previous_page();
-
-      refresh_grid(&config, &mut referential, &app_state, &tx_midi, false);
-      continue;
-    }
-    if note.note_id == NEXT_PAGE_NOTE {
-      referential.next_page();
-
-      refresh_grid(&config, &mut referential, &app_state, &tx_midi, false);
-      continue;
-    }
     if BOOKMARK_NOTES.contains(&note.note_id) {
       let index = BOOKMARK_NOTES.iter().position(|&r| r == note.note_id).unwrap();
       if !config.bookmark_exists(index) {
         continue;
       }
+      let mut referential = referential_mutex.lock().unwrap();
       referential.set_current_bookmark(BOOKMARK_NOTES[index]);
       // Get the bookmark parameter from Config based on index
       let bookmark_path = config.get_bookmark(index).expect("No path found for bookmark");
       referential.init(bookmark_path);
 
-      refresh_grid(&config, &mut referential, &app_state, &tx_midi, true);
+      refresh_grid(&config, &mut referential, &tx_midi, true);
       continue;
     }
 
@@ -261,16 +244,12 @@ fn main() -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
-fn refresh_grid(config: &Config, referential: &mut Referential, app_state: &Arc<Mutex<AppState>>, tx_midi: &Sender<NoteState>, with_header: bool) {
-  let page = referential.current_page().clone();
-  let app_state = Arc::clone(app_state);
-  app_state.lock().unwrap().set_page(page.clone());
-
+fn refresh_grid(config: &Config, referential: &mut Referential, tx_midi: &Sender<NoteState>, with_header: bool) {
   let thread_tx_midi = tx_midi.clone();
   // Clear the grid and right side
   clear_grid(&thread_tx_midi, if with_header { 99 } else { 89 });
 
-  for note in page.get_notes().iter() {
+  for note in referential.current_page().get_notes().iter() {
     thread_tx_midi.send((*note, false)).unwrap();
   }
 

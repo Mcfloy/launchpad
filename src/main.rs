@@ -4,7 +4,6 @@ extern crate core;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, mpsc, Mutex};
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 
@@ -129,7 +128,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     return Ok(());
   }
 
-  let current_page: AtomicU8 = AtomicU8::new(0);
   let page = referential.get_page(0).unwrap().clone();
   let app_state = Arc::new(Mutex::new(AppState {
     page
@@ -139,7 +137,7 @@ fn main() -> Result<(), Box<dyn Error>> {
   let (tx_note, rx_note): (Sender<NoteEvent>, Receiver<NoteEvent>) = mpsc::channel();
   let (tx_midi, rx_midi): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
 
-  refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, true);
+  refresh_grid(&config, &mut referential, &app_state, &tx_midi, true);
 
   // Activate programmer mode
   let midi_in_device_name = config.get_midi_in_device().unwrap();
@@ -199,51 +197,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         midi::actions::end_session(&tx_midi);
         break;
       },
+      STOP_NOTE => {
+        midi::actions::stop_note(&mut sinks);
+        continue;
+      }
       // TODO: Implement the other notes
       _ => {}
     };
     if note.note_id == FIRST_PAGE_NOTE {
-      if current_page.load(Ordering::Relaxed) == 0 {
-        continue;
-      }
-      current_page.store(0, Ordering::Relaxed);
+      referential.first_page();
 
-      refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, false);
+      refresh_grid(&config, &mut referential, &app_state, &tx_midi, false);
       continue;
     }
     if note.note_id == LAST_PAGE_NOTE {
-      if current_page.load(Ordering::Relaxed) == referential.get_nb_pages() - 1 {
-        continue;
-      }
-      current_page.store(referential.get_nb_pages() - 1, Ordering::Relaxed);
+      referential.last_page();
 
-      refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, false);
+      refresh_grid(&config, &mut referential, &app_state, &tx_midi, false);
       continue;
     }
     if note.note_id == PREV_PAGE_NOTE {
-      if current_page.load(Ordering::Relaxed) == 0 {
-        continue;
-      }
-      current_page.fetch_sub(1, Ordering::Relaxed);
+      referential.previous_page();
 
-      refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, false);
+      refresh_grid(&config, &mut referential, &app_state, &tx_midi, false);
       continue;
     }
     if note.note_id == NEXT_PAGE_NOTE {
-      if current_page.load(Ordering::Relaxed) >= referential.get_nb_pages() - 1 {
-        continue;
-      }
-      current_page.fetch_add(1, Ordering::Relaxed);
+      referential.next_page();
 
-      refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, false);
-      continue;
-    }
-    if note.note_id == STOP_NOTE {
-      for (audio_sink, virtual_sink) in sinks.values() {
-        audio_sink.stop();
-        virtual_sink.stop();
-      }
-      sinks.clear();
+      refresh_grid(&config, &mut referential, &app_state, &tx_midi, false);
       continue;
     }
     if BOOKMARK_NOTES.contains(&note.note_id) {
@@ -255,9 +237,8 @@ fn main() -> Result<(), Box<dyn Error>> {
       // Get the bookmark parameter from Config based on index
       let bookmark_path = config.get_bookmark(index).expect("No path found for bookmark");
       referential.init(bookmark_path);
-      current_page.store(0, Ordering::Relaxed);
 
-      refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, true);
+      refresh_grid(&config, &mut referential, &app_state, &tx_midi, true);
       continue;
     }
 
@@ -280,9 +261,8 @@ fn main() -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
-fn refresh_grid(config: &Config, referential: &mut Referential, current_page: &AtomicU8, app_state: &Arc<Mutex<AppState>>, tx_midi: &Sender<NoteState>, with_header: bool) {
-  let page = referential.get_page(current_page.load(Ordering::Relaxed))
-    .unwrap().clone();
+fn refresh_grid(config: &Config, referential: &mut Referential, app_state: &Arc<Mutex<AppState>>, tx_midi: &Sender<NoteState>, with_header: bool) {
+  let page = referential.current_page().clone();
   let app_state = Arc::clone(app_state);
   app_state.lock().unwrap().set_page(page.clone());
 
@@ -296,15 +276,15 @@ fn refresh_grid(config: &Config, referential: &mut Referential, current_page: &A
 
   if with_header {
     if referential.get_nb_pages() > 1 {
-      thread_tx_midi.send((Note::new(FIRST_PAGE_NOTE, "", WHITE_COLOR), false)).unwrap();
-      thread_tx_midi.send((Note::new(LAST_PAGE_NOTE, "", WHITE_COLOR), false)).unwrap();
-      thread_tx_midi.send((Note::new(PREV_PAGE_NOTE, "", WHITE_COLOR), false)).unwrap();
-      thread_tx_midi.send((Note::new(NEXT_PAGE_NOTE, "", WHITE_COLOR), false)).unwrap();
+      thread_tx_midi.send((Note::white(FIRST_PAGE_NOTE), false)).unwrap();
+      thread_tx_midi.send((Note::white(LAST_PAGE_NOTE), false)).unwrap();
+      thread_tx_midi.send((Note::white(PREV_PAGE_NOTE), false)).unwrap();
+      thread_tx_midi.send((Note::white(NEXT_PAGE_NOTE), false)).unwrap();
     }
-    thread_tx_midi.send((Note::new(END_SESSION_NOTE, "", WHITE_COLOR), false)).unwrap();
+    thread_tx_midi.send((Note::white(END_SESSION_NOTE), false)).unwrap();
   }
 
-  thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE_COLOR), false)).unwrap();
+  thread_tx_midi.send((Note::white(STOP_NOTE), false)).unwrap();
 
   for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
     if !config.bookmark_exists(i) {

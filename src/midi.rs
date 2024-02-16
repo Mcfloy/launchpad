@@ -58,13 +58,23 @@ pub fn listen_midi_input(name: &str, tx_on: Sender<NoteEvent>) -> Option<MidiInp
 }
 
 pub mod actions {
+    use std::collections::HashMap;
     use std::sync::mpsc::Sender;
     use std::thread;
     use std::time::Duration;
+    use rodio::Sink;
     use crate::{clear_grid, NoteState};
 
     pub fn end_session(tx_midi: &Sender<NoteState>) {
         clear_grid(&tx_midi, 99);
         thread::sleep(Duration::from_millis(100));
+    }
+
+    pub fn stop_note(sinks: &mut HashMap<u8, (Sink, Sink)>) {
+        for (audio_sink, virtual_sink) in sinks.values() {
+            audio_sink.stop();
+            virtual_sink.stop();
+        }
+        sinks.clear();
     }
 }

@@ -114,6 +114,10 @@ impl Referential {
         self.pages.get(page_number as usize)
     }
 
+    pub fn current_page(&self) -> &Page {
+        &self.pages[self.current_page]
+    }
+
     pub fn previous_page(&mut self) {
         if self.current_page > 0 {
             self.current_page -= 1;

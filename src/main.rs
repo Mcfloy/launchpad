@@ -7,9 +7,9 @@ use std::sync::{Arc, mpsc, Mutex};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
-use std::time::Duration;
 
 use config_file::FromConfigFile;
+use log::{debug, error};
 use rodio::{Sink};
 
 use crate::config::Config;
@@ -18,6 +18,7 @@ use crate::referential::{Note, Page, Referential};
 mod config;
 mod referential;
 mod audio;
+mod midi;
 
 const WHITE_COLOR: u8 = 3;
 const GREEN_COLOR: u8 = 87;
@@ -33,6 +34,7 @@ const SYSTEM_NOTES: [u8; 6] = [FIRST_PAGE_NOTE, LAST_PAGE_NOTE, PREV_PAGE_NOTE, 
 const BOOKMARK_NOTES: [u8; 7] = [89, 79, 69, 59, 49, 39, 29];
 
 type NoteState = (Note, bool);
+type NoteEvent = (u8, bool);
 
 #[derive(Debug, Clone)]
 struct AppState {
@@ -62,51 +64,32 @@ fn main() -> Result<(), Box<dyn Error>> {
   midi_in.ignore(midir::Ignore::All);
 
   if is_debug_enabled {
-    println!("Available MIDI input ports:");
-    for p in midi_in.ports() {
-      println!("\t- {}", midi_in.port_name(&p).unwrap());
+    debug!("Available MIDI input ports:");
+    for p in midi::get_midi_input_devices() {
+      debug!("  - {}", p);
     }
   }
 
   let mut current_bookmark: u8 = 0;
 
-  let midi_in_device_name = config.get_midi_in_device().unwrap();
-  let mut potential_in_port = None;
-  for p in midi_in.ports() {
-    let port_name = midi_in.port_name(&p).unwrap();
-    if port_name.eq_ignore_ascii_case(midi_in_device_name.as_str()) {
-      potential_in_port = Some(p);
+  let mut conn_out;
 
-      println!("Selected input port: {}", port_name);
+  match midi::select_midi_output_device(config.get_midi_out_device().unwrap()) {
+    Some(conn) => {
+      conn_out = conn;
+    }
+    _ => {
+      error!("No midi output port found, have you plugged your midi device ?");
+      return Ok(());
     }
   }
-
-  let midi_in_port = potential_in_port.as_ref()
-    .expect("No midi input port found, have you plugged your midi device ?");
-
-  let midi_out = midir::MidiOutput::new("midir reading output")?;
 
   if is_debug_enabled {
-    println!("Available output ports:");
-    for p in midi_out.ports() {
-      println!("\t- {}", midi_out.port_name(&p).unwrap());
+    debug!("Available output ports:");
+    for p in midi::get_midi_output_devices() {
+      debug!("  - {}", p);
     }
   }
-
-  let mut potential_out_port = None;
-  for p in midi_out.ports() {
-    let port_name = midi_out.port_name(&p).unwrap();
-    if port_name.eq_ignore_ascii_case(config.get_midi_out_device().unwrap().as_str()) {
-      potential_out_port = Some(p);
-
-      println!("Selected output port: {}", port_name);
-    }
-  }
-
-  let midi_out_port = potential_out_port.as_ref()
-    .expect("No midi output port found, have you plugged your midi device ?");
-
-  let mut conn_out = midi_out.connect(midi_out_port, "midir-read-output")?;
 
   let (_output_stream, output_handle);
 
@@ -116,15 +99,15 @@ fn main() -> Result<(), Box<dyn Error>> {
       output_handle = handle;
     }
     None => {
-      println!("No audio device found");
+      error!("No audio device found");
       return Ok(());
     }
   }
 
   if is_debug_enabled {
-    println!("Available output devices:");
+    debug!("Available output devices:");
     for device in audio::get_output_devices() {
-      println!("\t- {}", device);
+      debug!("  - {}", device);
     }
   }
 
@@ -135,7 +118,7 @@ fn main() -> Result<(), Box<dyn Error>> {
       virtual_handle = handle;
     }
     None => {
-      println!("No virtual device found");
+      error!("No virtual device found");
       return Ok(());
     }
   }
@@ -144,7 +127,7 @@ fn main() -> Result<(), Box<dyn Error>> {
   referential.init(String::from("pages"));
 
   if referential.get_nb_pages() == 0 {
-    println!("No pages found");
+    error!("No pages found");
     return Ok(());
   }
 
@@ -155,11 +138,13 @@ fn main() -> Result<(), Box<dyn Error>> {
   }));
 
   let (tx_on, rx_on): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
+  let (tx_note, rx_note): (Sender<NoteEvent>, Receiver<NoteEvent>) = mpsc::channel();
   let (tx_midi, rx_midi): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
 
   refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, true);
 
   // Activate programmer mode
+  let midi_in_device_name = config.get_midi_in_device().unwrap();
   if midi_in_device_name.contains("LPMiniMK3") {
     println!("Programmer mode activated");
     conn_out.send(&[240, 0, 32, 41, 2, 13, 14, 1, 247]).unwrap();
@@ -180,32 +165,27 @@ fn main() -> Result<(), Box<dyn Error>> {
   });
 
   let thread_app_state = Arc::clone(&app_state);
-  let mut sinks: HashMap<u8, (Sink, Sink)> = HashMap::new();
-  // Listen to the midi inputs
-  let _conn_in = midi_in.connect(midi_in_port, "midir-read-input", move |_stamp, message, _| {
-    let is_on = message[2] == 127;
-    let message = [message[0], message[1]];
-    let page = thread_app_state.lock().unwrap().get_page().clone();
 
-    if is_on {
-      if is_debug_enabled {
-        println!("Pressed {:?}", message);
-      }
-      let thread_tx = tx_on.clone();
-      if SYSTEM_NOTES.contains(&message[1]) || BOOKMARK_NOTES.contains(&message[1]) {
-        thread_tx.send((Note::new(message[1], "", 0), is_on)).unwrap();
-      }
-      if let Some(note) = page.get_note(message[1]) {
-        thread_tx.send((note, is_on)).unwrap();
-      }
-    } else if is_hold_to_play_enabled {
-      let thread_tx = tx_on.clone();
-      if let Some(note) = page.get_note(message[1]) {
-        thread_tx.send((note, is_on)).unwrap();
+  // New thread to manage to handle the received events from the midi input
+  thread::spawn(move || {
+    let thread_app_state = thread_app_state;
+    for event in rx_note {
+      // Only handle on note
+      if event.1 {
+        // Check if the note is a system note
+        if SYSTEM_NOTES.contains(&event.0) || BOOKMARK_NOTES.contains(&event.0) {
+          tx_on.send((Note::off(event.0), event.1)).unwrap();
+        }
+        if let Some(note) = thread_app_state.lock().unwrap().get_page().get_note(event.0) {
+          tx_on.send((note, event.1)).unwrap();
+        }
       }
     }
-  }, ())?;
+  });
 
+  let mut sinks: HashMap<u8, (Sink, Sink)> = HashMap::new();
+
+  let _conn_in = midi::listen_midi_input(midi_in_device_name, tx_note);
 
   // Loop to handle the commands
   for (note, is_on) in rx_on {
@@ -216,13 +196,14 @@ fn main() -> Result<(), Box<dyn Error>> {
       }
       continue;
     }
-    if note.note_id == END_SESSION_NOTE {
-      // Close everything
-      let thread_tx_midi = tx_midi;
-      clear_grid(&thread_tx_midi, 99);
-      thread::sleep(Duration::from_millis(100));
-      break;
-    }
+    match note.note_id {
+      END_SESSION_NOTE => {
+        midi::actions::end_session(&tx_midi);
+        break;
+      },
+      // TODO: Implement the other notes
+      _ => {}
+    };
     if note.note_id == FIRST_PAGE_NOTE {
       if current_page.load(Ordering::Relaxed) == 0 {
         continue;
@@ -281,6 +262,7 @@ fn main() -> Result<(), Box<dyn Error>> {
       refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, true);
       continue;
     }
+
     let (audio_sink, duration) = audio::play_sound(&output_handle, note.path, 1.0);
     let (virtual_sink, _duration) = audio::play_sound(&virtual_handle, note.path, 0.1);
 

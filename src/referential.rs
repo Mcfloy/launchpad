@@ -65,17 +65,20 @@ impl Page {
 
 pub(crate) struct Referential {
     pages: Vec<Page>,
+    current_page: usize
 }
 
 impl Referential {
     pub fn new() -> Self {
         Referential {
-            pages: vec![]
+            pages: vec![],
+            current_page: 0
         }
     }
 
     pub fn init(&mut self, folder: String) {
         self.pages = vec![];
+        self.current_page = 0;
         let paths = fs::read_dir(folder.as_str()).unwrap();
         for path in paths {
             let path = path.unwrap().path();
@@ -84,7 +87,7 @@ impl Referential {
                 let mut page = Page::new(vec![]);
 
                 let content = fs::read_to_string(path.clone()).unwrap();
-                // Create a new for each line in content
+                // Create new for each line in content
                 for line in content.lines() {
                     let mut line = line.split(';');
                     let note_id = line.next().unwrap().parse::<u8>().unwrap();
@@ -107,5 +110,29 @@ impl Referential {
             page_number = self.pages.len() as u8;
         }
         self.pages.get(page_number as usize)
+    }
+
+    pub fn previous_page(&mut self) {
+        if self.current_page > 0 {
+            self.current_page -= 1;
+        }
+    }
+
+    pub fn next_page(&mut self) {
+        if self.current_page < self.pages.len() - 1 {
+            self.current_page += 1;
+        }
+    }
+
+    pub fn first_page(&mut self) {
+        self.current_page = 0;
+    }
+
+    pub fn last_page(&mut self) {
+        self.current_page = self.pages.len() - 1;
+    }
+
+    pub fn get_note(&self, note_id: u8) -> Option<Note> {
+        self.pages[self.current_page].get_note(note_id)
     }
 }

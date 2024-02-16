@@ -20,12 +20,12 @@ pub struct Config {
 impl Config {
     // TODO: Create an init function
 
-    pub fn get_midi_in_device(&self) -> Option<String> {
-        self.midi_in_device.clone()
+    pub fn get_midi_in_device(&self) -> Option<&str> {
+        self.midi_in_device.as_deref()
     }
 
-    pub fn get_midi_out_device(&self) -> Option<String> {
-        self.midi_out_device.clone()
+    pub fn get_midi_out_device(&self) -> Option<&str> {
+        self.midi_out_device.as_deref()
     }
 
     pub fn get_output_device(&self) -> Option<&str> {

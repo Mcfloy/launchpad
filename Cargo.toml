@@ -9,8 +9,10 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+config-file = { version = "0.2.3", features = ["yaml"] }
 cpal = "0.15.2"
+log = "0.4.20"
 midir = "0.9.1"
 rodio = "0.17.3"
 serde = { version = "1.0.196", features = ["derive"] }
-config-file = { version = "0.2.3", features = ["yaml"] }
+serde_yaml = "0.9.31"

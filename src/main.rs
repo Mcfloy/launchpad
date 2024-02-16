@@ -70,8 +70,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
   }
 
-  let mut current_bookmark: u8 = 0;
-
   let mut conn_out;
 
   match midi::select_midi_output_device(config.get_midi_out_device().unwrap()) {
@@ -141,7 +139,7 @@ fn main() -> Result<(), Box<dyn Error>> {
   let (tx_note, rx_note): (Sender<NoteEvent>, Receiver<NoteEvent>) = mpsc::channel();
   let (tx_midi, rx_midi): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
 
-  refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, true);
+  refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, true);
 
   // Activate programmer mode
   let midi_in_device_name = config.get_midi_in_device().unwrap();
@@ -210,7 +208,7 @@ fn main() -> Result<(), Box<dyn Error>> {
       }
       current_page.store(0, Ordering::Relaxed);
 
-      refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, false);
+      refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, false);
       continue;
     }
     if note.note_id == LAST_PAGE_NOTE {
@@ -219,7 +217,7 @@ fn main() -> Result<(), Box<dyn Error>> {
       }
       current_page.store(referential.get_nb_pages() - 1, Ordering::Relaxed);
 
-      refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, false);
+      refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, false);
       continue;
     }
     if note.note_id == PREV_PAGE_NOTE {
@@ -228,7 +226,7 @@ fn main() -> Result<(), Box<dyn Error>> {
       }
       current_page.fetch_sub(1, Ordering::Relaxed);
 
-      refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, false);
+      refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, false);
       continue;
     }
     if note.note_id == NEXT_PAGE_NOTE {
@@ -237,7 +235,7 @@ fn main() -> Result<(), Box<dyn Error>> {
       }
       current_page.fetch_add(1, Ordering::Relaxed);
 
-      refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, false);
+      refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, false);
       continue;
     }
     if note.note_id == STOP_NOTE {
@@ -253,13 +251,13 @@ fn main() -> Result<(), Box<dyn Error>> {
       if !config.bookmark_exists(index) {
         continue;
       }
-      current_bookmark = BOOKMARK_NOTES[index];
+      referential.set_current_bookmark(BOOKMARK_NOTES[index]);
       // Get the bookmark parameter from Config based on index
       let bookmark_path = config.get_bookmark(index).expect("No path found for bookmark");
       referential.init(bookmark_path);
       current_page.store(0, Ordering::Relaxed);
 
-      refresh_grid(&config, &mut current_bookmark, &mut referential, &current_page, &app_state, &tx_midi, true);
+      refresh_grid(&config, &mut referential, &current_page, &app_state, &tx_midi, true);
       continue;
     }
 
@@ -282,7 +280,7 @@ fn main() -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
-fn refresh_grid(config: &Config, current_bookmark: &mut u8, referential: &mut Referential, current_page: &AtomicU8, app_state: &Arc<Mutex<AppState>>, tx_midi: &Sender<NoteState>, with_header: bool) {
+fn refresh_grid(config: &Config, referential: &mut Referential, current_page: &AtomicU8, app_state: &Arc<Mutex<AppState>>, tx_midi: &Sender<NoteState>, with_header: bool) {
   let page = referential.get_page(current_page.load(Ordering::Relaxed))
     .unwrap().clone();
   let app_state = Arc::clone(app_state);
@@ -307,25 +305,22 @@ fn refresh_grid(config: &Config, current_bookmark: &mut u8, referential: &mut Re
   }
 
   thread_tx_midi.send((Note::new(STOP_NOTE, "", WHITE_COLOR), false)).unwrap();
-  signal_bookmarks(config, current_bookmark, thread_tx_midi);
+
+  for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
+    if !config.bookmark_exists(i) {
+      continue;
+    }
+    if referential.is_current_bookmark(*bookmark_note) {
+      thread_tx_midi.send((Note::green(*bookmark_note), false)).unwrap();
+    } else {
+      thread_tx_midi.send((Note::white(*bookmark_note), false)).unwrap();
+    }
+  }
 }
 
 fn clear_grid(thread_tx_midi: &Sender<NoteState>, max_note: u8) {
   for note in 1..max_note {
     let note = Note::off(note);
     thread_tx_midi.send((note, false)).unwrap();
-  }
-}
-
-fn signal_bookmarks(config: &Config, current_bookmark: &mut u8, thread_tx_midi: Sender<NoteState>) {
-  for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
-    if !config.bookmark_exists(i) {
-      continue;
-    }
-    if *current_bookmark == *bookmark_note {
-      thread_tx_midi.send((Note::green(*bookmark_note), false)).unwrap();
-    } else {
-      thread_tx_midi.send((Note::white(*bookmark_note), false)).unwrap();
-    }
   }
 }

@@ -1,5 +1,5 @@
 use std::fs;
-use crate::{GREEN_COLOR, WHITE_COLOR};
+use crate::{BOOKMARK_NOTES, GREEN_COLOR, WHITE_COLOR};
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Note {
@@ -65,14 +65,16 @@ impl Page {
 
 pub(crate) struct Referential {
     pages: Vec<Page>,
-    current_page: usize
+    current_page: usize,
+    current_bookmark: u8,
 }
 
 impl Referential {
     pub fn new() -> Self {
         Referential {
             pages: vec![],
-            current_page: 0
+            current_page: 0,
+            current_bookmark: BOOKMARK_NOTES[0],
         }
     }
 
@@ -134,5 +136,13 @@ impl Referential {
 
     pub fn get_note(&self, note_id: u8) -> Option<Note> {
         self.pages[self.current_page].get_note(note_id)
+    }
+
+    pub fn is_current_bookmark(&self, bookmark_note_id: u8) -> bool {
+        return self.current_bookmark == bookmark_note_id;
+    }
+
+    pub fn set_current_bookmark(&mut self, bookmark_note_id: u8) {
+        self.current_bookmark = bookmark_note_id;
     }
 }

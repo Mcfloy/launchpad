@@ -1,5 +1,6 @@
 use std::fs;
-use crate::{BOOKMARK_NOTES, GREEN_COLOR, WHITE_COLOR};
+use crate::{GREEN_COLOR, WHITE_COLOR};
+use crate::launchpad::Launchpad;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Note {
@@ -70,11 +71,11 @@ pub(crate) struct Referential {
 }
 
 impl Referential {
-    pub fn new() -> Self {
+    pub fn new(launchpad: &Launchpad) -> Self {
         Referential {
             pages: vec![],
             current_page: 0,
-            current_bookmark: BOOKMARK_NOTES[0],
+            current_bookmark: launchpad.bookmark_notes()[0],
         }
     }
 
@@ -105,13 +106,6 @@ impl Referential {
 
     pub fn get_nb_pages(&self) -> u8 {
         self.pages.len() as u8
-    }
-
-    pub fn get_page(&self, mut page_number: u8) -> Option<&Page> {
-        if page_number > self.pages.len() as u8 {
-            page_number = self.pages.len() as u8;
-        }
-        self.pages.get(page_number as usize)
     }
 
     pub fn current_page(&self) -> &Page {

@@ -1,7 +1,10 @@
 use std::sync::mpsc::Sender;
 use log::warn;
 use midir::{MidiInputConnection, MidiInputPort};
-use crate::{NoteEvent};
+use crate::{NoteEvent, NoteState};
+use crate::config::Config;
+use crate::launchpad::Launchpad;
+use crate::referential::{Note, Referential};
 
 pub fn get_midi_input_devices() -> Vec<String> {
     let midi_in = midir::MidiInput::new("launchpad-soundpad").unwrap();
@@ -57,13 +60,54 @@ pub fn listen_midi_input(name: &str, tx_on: Sender<NoteEvent>) -> Option<MidiInp
     None
 }
 
+pub fn refresh_grid(launchpad: &Launchpad, config: &Config, referential: &mut Referential, tx_midi: &Sender<NoteState>, with_header: bool) {
+    let thread_tx_midi = tx_midi.clone();
+    // Clear the grid and right side
+    clear_grid(&thread_tx_midi, if with_header { 99 } else { 89 });
+
+    for note in referential.current_page().get_notes().iter() {
+        thread_tx_midi.send((*note, false)).unwrap();
+    }
+
+    if with_header {
+        if referential.get_nb_pages() > 1 {
+            thread_tx_midi.send((Note::white(launchpad.first_page_note()), false)).unwrap();
+            thread_tx_midi.send((Note::white(launchpad.last_page_note()), false)).unwrap();
+            thread_tx_midi.send((Note::white(launchpad.prev_page_note()), false)).unwrap();
+            thread_tx_midi.send((Note::white(launchpad.next_page_note()), false)).unwrap();
+        }
+        thread_tx_midi.send((Note::white(launchpad.end_session_note()), false)).unwrap();
+    }
+
+    thread_tx_midi.send((Note::white(launchpad.stop_note()), false)).unwrap();
+
+    for (i, bookmark_note) in launchpad.bookmark_notes().iter().enumerate() {
+        if !config.bookmark_exists(i) {
+            continue;
+        }
+        if referential.is_current_bookmark(*bookmark_note) {
+            thread_tx_midi.send((Note::green(*bookmark_note), false)).unwrap();
+        } else {
+            thread_tx_midi.send((Note::white(*bookmark_note), false)).unwrap();
+        }
+    }
+}
+
+pub fn clear_grid(thread_tx_midi: &Sender<NoteState>, max_note: u8) {
+    for note in 1..max_note {
+        let note = Note::off(note);
+        thread_tx_midi.send((note, false)).unwrap();
+    }
+}
+
 pub mod actions {
     use std::collections::HashMap;
     use std::sync::mpsc::Sender;
     use std::thread;
     use std::time::Duration;
     use rodio::Sink;
-    use crate::{clear_grid, NoteState};
+    use crate::{NoteState};
+    use crate::midi::clear_grid;
 
     pub fn end_session(tx_midi: &Sender<NoteState>) {
         clear_grid(&tx_midi, 99);

@@ -5,32 +5,24 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, mpsc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
-use std::thread;
+use std::{env, thread};
 
 use config_file::FromConfigFile;
 use log::{debug, error};
 use rodio::{Sink};
 
 use crate::config::Config;
+use crate::launchpad::Launchpad;
 use crate::referential::{Note, Referential};
 
 mod config;
 mod referential;
 mod audio;
 mod midi;
+mod launchpad;
 
 const WHITE_COLOR: u8 = 3;
 const GREEN_COLOR: u8 = 87;
-
-// Exclusive notes from Launchpad Mini Mk3, change them at your convenience.
-const FIRST_PAGE_NOTE: u8 = 91;
-const LAST_PAGE_NOTE: u8 = 92;
-const PREV_PAGE_NOTE: u8 = 93;
-const NEXT_PAGE_NOTE: u8 = 94;
-const END_SESSION_NOTE: u8 = 95;
-const STOP_NOTE: u8 = 19;
-const SYSTEM_NOTES: [u8; 6] = [FIRST_PAGE_NOTE, LAST_PAGE_NOTE, PREV_PAGE_NOTE, NEXT_PAGE_NOTE, END_SESSION_NOTE, STOP_NOTE];
-const BOOKMARK_NOTES: [u8; 7] = [89, 79, 69, 59, 49, 39, 29];
 
 type NoteState = (Note, bool);
 type NoteEvent = (u8, bool);
@@ -39,19 +31,22 @@ fn main() -> Result<(), Box<dyn Error>> {
   // TODO: Load the configuration file from config.yaml, if not found generate a default one
   // Also it should be initialized inside the config module.
   let config = Config::from_config_file("config.yaml").unwrap();
-  // TODO: Replace with an internal environment variable
-  let is_debug_enabled = config.is_debug_enabled();
-  // TODO: Replace with an internal environment variable
+
+  if config.is_debug_enabled() {
+    env::set_var("RUST_LOG", "debug");
+  }
+
   let is_hold_to_play_enabled = config.is_hold_to_play_enabled();
+  env::set_var("HOLD_TO_PLAY", is_hold_to_play_enabled.to_string());
+
+  env_logger::init();
 
   let mut midi_in = midir::MidiInput::new("midir reading input")?;
   midi_in.ignore(midir::Ignore::All);
 
-  if is_debug_enabled {
-    debug!("Available MIDI input ports:");
-    for p in midi::get_midi_input_devices() {
-      debug!("  - {}", p);
-    }
+  debug!("Available MIDI input ports:");
+  for p in midi::get_midi_input_devices() {
+    debug!("  - {}", p);
   }
 
   let mut conn_out;
@@ -66,11 +61,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
   }
 
-  if is_debug_enabled {
-    debug!("Available output ports:");
-    for p in midi::get_midi_output_devices() {
-      debug!("  - {}", p);
-    }
+  let midi_in_device_name = config.get_midi_in_device().unwrap();
+  let launchpad = Arc::new(Launchpad::get_launchpad(midi_in_device_name));
+
+  debug!("Available output ports:");
+  for p in midi::get_midi_output_devices() {
+    debug!("  - {}", p);
   }
 
   let (_output_stream, output_handle);
@@ -86,11 +82,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
   }
 
-  if is_debug_enabled {
-    debug!("Available output devices:");
-    for device in audio::get_output_devices() {
-      debug!("  - {}", device);
-    }
+  debug!("Available output devices:");
+  for device in audio::get_output_devices() {
+    debug!("  - {}", device);
   }
 
   let (_virtual_stream, virtual_handle);
@@ -105,7 +99,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
   }
 
-  let mut referential = Referential::new();
+  let mut referential = Referential::new(&launchpad);
   referential.init(String::from("pages"));
 
   let referential_mutex = Arc::new(Mutex::new(referential));
@@ -119,18 +113,10 @@ fn main() -> Result<(), Box<dyn Error>> {
   let (tx_note, rx_note): (Sender<NoteEvent>, Receiver<NoteEvent>) = mpsc::channel();
   let (tx_midi, rx_midi): (Sender<NoteState>, Receiver<NoteState>) = mpsc::channel();
 
-  refresh_grid(&config, &mut referential_mutex.lock().unwrap(), &tx_midi, true);
+  midi::refresh_grid(&launchpad, &config, &mut referential_mutex.lock().unwrap(), &tx_midi, true);
 
   // Activate programmer mode
-  let midi_in_device_name = config.get_midi_in_device().unwrap();
-  if midi_in_device_name.contains("LPMiniMK3") {
-    println!("Programmer mode activated");
-    conn_out.send(&[240, 0, 32, 41, 2, 13, 14, 1, 247]).unwrap();
-  } else if midi_in_device_name.contains("LPX") {
-    conn_out.send(&[240, 0, 32, 41, 2, 12, 127, 247]).unwrap();
-  } else {
-    println!("No programmer mode available for this device. Please create an issue on the repository.");
-  }
+  conn_out.send(launchpad.programmer_mode_command()).unwrap();
 
   // Thread to manage the midi LEDs
   thread::spawn(move || {
@@ -142,8 +128,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
   });
 
-
   let referential_clone = referential_mutex.clone();
+  let launchpad_clone = launchpad.clone();
   // New thread to manage to handle the received events from the midi input
   thread::spawn(move || {
     for event in rx_note {
@@ -151,7 +137,7 @@ fn main() -> Result<(), Box<dyn Error>> {
       let referential = referential_clone.lock().unwrap();
       if event.1 {
         // Check if the note is a system note
-        if SYSTEM_NOTES.contains(&event.0) || BOOKMARK_NOTES.contains(&event.0) {
+        if launchpad_clone.system_notes().contains(&event.0) || launchpad_clone.bookmark_notes().contains(&event.0) {
           tx_on.send((Note::off(event.0), event.1)).unwrap();
         }
         if let Some(note) = &referential.get_note(event.0) {
@@ -175,53 +161,55 @@ fn main() -> Result<(), Box<dyn Error>> {
       }
       continue;
     }
-    match note.note_id {
-      END_SESSION_NOTE => {
-        midi::actions::end_session(&tx_midi);
-        break;
-      },
-      STOP_NOTE => {
-        midi::actions::stop_note(&mut sinks);
-        continue;
-      },
-      FIRST_PAGE_NOTE => {
-        let mut referential = referential_clone.lock().unwrap();
-        referential.first_page();
+    if note.note_id == launchpad.end_session_note() {
+      midi::actions::end_session(&tx_midi);
+      break;
+    }
+    if note.note_id == launchpad.stop_note() {
+      midi::actions::stop_note(&mut sinks);
+      continue;
+    }
+    if note.note_id == launchpad.first_page_note() {
+      let mut referential = referential_clone.lock().unwrap();
+      referential.first_page();
 
-        refresh_grid(&config, &mut referential, &tx_midi, false);
-      },
-      LAST_PAGE_NOTE => {
-        let mut referential = referential_clone.lock().unwrap();
-        referential.last_page();
+      midi::refresh_grid(&launchpad, &config, &mut referential, &tx_midi, false);
+      continue;
+    }
+    if note.note_id == launchpad.last_page_note() {
+      let mut referential = referential_clone.lock().unwrap();
+      referential.last_page();
 
-        refresh_grid(&config, &mut referential, &tx_midi, false);
-      },
-      PREV_PAGE_NOTE => {
-        let mut referential = referential_clone.lock().unwrap();
-        referential.previous_page();
+      midi::refresh_grid(&launchpad, &config, &mut referential, &tx_midi, false);
+      continue;
+    }
+    if note.note_id == launchpad.prev_page_note() {
+      let mut referential = referential_clone.lock().unwrap();
+      referential.previous_page();
 
-        refresh_grid(&config, &mut referential, &tx_midi, false);
-      },
-      NEXT_PAGE_NOTE => {
-        let mut referential = referential_clone.lock().unwrap();
-        referential.next_page();
+      midi::refresh_grid(&launchpad, &config, &mut referential, &tx_midi, false);
+      continue;
+    }
+    if note.note_id == launchpad.next_page_note() {
+      let mut referential = referential_clone.lock().unwrap();
+      referential.next_page();
 
-        refresh_grid(&config, &mut referential, &tx_midi, false);
-      },
-      _ => {}
-    };
-    if BOOKMARK_NOTES.contains(&note.note_id) {
-      let index = BOOKMARK_NOTES.iter().position(|&r| r == note.note_id).unwrap();
+      midi::refresh_grid(&launchpad, &config, &mut referential, &tx_midi, false);
+      continue;
+    }
+    let bookmark_notes = launchpad.bookmark_notes();
+    if bookmark_notes.contains(&note.note_id) {
+      let index = bookmark_notes.iter().position(|&r| r == note.note_id).unwrap();
       if !config.bookmark_exists(index) {
         continue;
       }
       let mut referential = referential_mutex.lock().unwrap();
-      referential.set_current_bookmark(BOOKMARK_NOTES[index]);
+      referential.set_current_bookmark(bookmark_notes[index]);
       // Get the bookmark parameter from Config based on index
       let bookmark_path = config.get_bookmark(index).expect("No path found for bookmark");
       referential.init(bookmark_path);
 
-      refresh_grid(&config, &mut referential, &tx_midi, true);
+      midi::refresh_grid(&launchpad, &config, &mut referential, &tx_midi, true);
       continue;
     }
 
@@ -242,44 +230,4 @@ fn main() -> Result<(), Box<dyn Error>> {
   }
 
   Ok(())
-}
-
-fn refresh_grid(config: &Config, referential: &mut Referential, tx_midi: &Sender<NoteState>, with_header: bool) {
-  let thread_tx_midi = tx_midi.clone();
-  // Clear the grid and right side
-  clear_grid(&thread_tx_midi, if with_header { 99 } else { 89 });
-
-  for note in referential.current_page().get_notes().iter() {
-    thread_tx_midi.send((*note, false)).unwrap();
-  }
-
-  if with_header {
-    if referential.get_nb_pages() > 1 {
-      thread_tx_midi.send((Note::white(FIRST_PAGE_NOTE), false)).unwrap();
-      thread_tx_midi.send((Note::white(LAST_PAGE_NOTE), false)).unwrap();
-      thread_tx_midi.send((Note::white(PREV_PAGE_NOTE), false)).unwrap();
-      thread_tx_midi.send((Note::white(NEXT_PAGE_NOTE), false)).unwrap();
-    }
-    thread_tx_midi.send((Note::white(END_SESSION_NOTE), false)).unwrap();
-  }
-
-  thread_tx_midi.send((Note::white(STOP_NOTE), false)).unwrap();
-
-  for (i, bookmark_note) in BOOKMARK_NOTES.iter().enumerate() {
-    if !config.bookmark_exists(i) {
-      continue;
-    }
-    if referential.is_current_bookmark(*bookmark_note) {
-      thread_tx_midi.send((Note::green(*bookmark_note), false)).unwrap();
-    } else {
-      thread_tx_midi.send((Note::white(*bookmark_note), false)).unwrap();
-    }
-  }
-}
-
-fn clear_grid(thread_tx_midi: &Sender<NoteState>, max_note: u8) {
-  for note in 1..max_note {
-    let note = Note::off(note);
-    thread_tx_midi.send((note, false)).unwrap();
-  }
 }

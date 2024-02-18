@@ -12,6 +12,7 @@ license = "MIT"
 config-file = { version = "0.2.3", features = ["yaml"] }
 cpal = "0.15.2"
 log = "0.4.20"
+env_logger = "0.11.2"
 midir = "0.9.1"
 rodio = "0.17.3"
 serde = { version = "1.0.196", features = ["derive"] }

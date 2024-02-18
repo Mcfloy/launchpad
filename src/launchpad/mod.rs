@@ -46,13 +46,6 @@ impl Launchpad {
     }
   }
 
-  pub(crate) fn system_notes<'n>(&self) -> &'n[u8] {
-    match self {
-      Launchpad::MiniMk3 => &[91, 92, 93, 94, 95, 19],
-      Launchpad::X => &[91, 92, 93, 94, 95, 19]
-    }
-  }
-
   pub(crate) fn bookmark_notes<'n>(&self) -> &'n[u8] {
     match self {
       Launchpad::MiniMk3 => &[89, 79, 69, 59, 49, 39, 29],

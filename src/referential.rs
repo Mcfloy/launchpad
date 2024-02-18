@@ -1,5 +1,5 @@
 use std::fs;
-use crate::{GREEN_COLOR, WHITE_COLOR};
+use crate::{GREEN_COLOR, MidiOutputEvent, WHITE_COLOR};
 use crate::launchpad::Launchpad;
 
 #[derive(Debug, Copy, Clone)]
@@ -40,6 +40,18 @@ impl Note {
             path: "",
             color: 0,
         }
+    }
+}
+
+impl Into<MidiOutputEvent> for Note {
+    fn into(self) -> MidiOutputEvent {
+        (self.note_id, self.color, false)
+    }
+}
+
+impl Into<MidiOutputEvent> for &Note {
+    fn into(self) -> MidiOutputEvent {
+        (self.note_id, self.color, false)
     }
 }
 

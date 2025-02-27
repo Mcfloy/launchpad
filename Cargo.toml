@@ -13,4 +13,5 @@ cpal = "0.14.1"
 midir = "0.9.1"
 rodio = "0.16.0"
 serde = { version = "1.0.158", features = ["derive"] }
+proc-macro2 = { version = "1.0.60", features=["default", "proc-macro"] }
 config-file = { version = "0.2.3", features = ["yaml"] }

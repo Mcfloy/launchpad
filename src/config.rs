@@ -13,7 +13,6 @@ pub struct Config {
     bookmark_5: Option<String>,
     bookmark_6: Option<String>,
     bookmark_7: Option<String>,
-    debug_mode: bool,
     hold_to_play: bool,
 }
 
@@ -62,11 +61,11 @@ impl Config {
         }
     }
 
-    pub fn is_debug_enabled(&self) -> bool {
-        self.debug_mode
-    }
-
     pub fn is_hold_to_play_enabled(&self) -> bool {
         self.hold_to_play
+    }
+
+    pub fn swap_hold_to_play(&mut self) {
+        self.hold_to_play = !self.hold_to_play;
     }
 }

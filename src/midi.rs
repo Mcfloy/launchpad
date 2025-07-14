@@ -77,6 +77,12 @@ pub fn refresh_grid(launchpad: &Launchpad, config: &Config, referential: &mut Re
             thread_tx_midi.send(Note::white(launchpad.next_page_note()).into()).unwrap();
         }
         thread_tx_midi.send(Note::white(launchpad.end_session_note()).into()).unwrap();
+        let hold_mode_note = if config.is_hold_to_play_enabled() {
+            Note::green(launchpad.swap_hold_mode_note())
+        } else {
+            Note::white(launchpad.swap_hold_mode_note())
+        };
+        thread_tx_midi.send(hold_mode_note.into()).unwrap();
     }
 
     thread_tx_midi.send(Note::white(launchpad.stop_note()).into()).unwrap();

@@ -1,19 +1,19 @@
 [package]
 name = "launch-soundpad"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Lucas Perreau"]
-description = "A soundpad with Launchpad"
-edition = "2021"
+description = "A soundpad using Launchpad"
+edition = "2024"
 license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 config-file = { version = "0.2.3", features = ["yaml"] }
-cpal = "0.15.2"
-log = "0.4.20"
-env_logger = "0.11.2"
-midir = "0.9.1"
-rodio = "0.17.3"
-serde = { version = "1.0.196", features = ["derive"] }
-serde_yaml = "0.9.31"
+cpal = "0.16.0"
+log = "0.4.27"
+env_logger = "0.11.8"
+midir = "0.10.1"
+rodio = "0.21.1"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_yaml = "0.9.34+deprecated"

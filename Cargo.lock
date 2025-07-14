@@ -414,6 +414,7 @@ dependencies = [
  "env_logger",
  "log",
  "midir",
+ "proc-macro2",
  "rodio",
  "serde",
  "serde_yaml 0.9.34+deprecated",

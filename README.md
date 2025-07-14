@@ -2,10 +2,26 @@
 
 Rust application to play sounds/music from a launchpad (tested with a Launchpad Mini MK3), with unlimited possibilities.
 
-You will be able to assign each note of the grid to a sound and play it by pressing the corresponding button.
-You can play multiple sounds at the same time, and also stop them directly.
-You can assign up to 64 notes per page, and unlimited pages (as long as you have enough memory) with a pagination system.
-To help you organize your sounds, you can also assign bookmarks to folders containing the pages.
+## Why this application
+
+I had bought Soundpad and played with it for 1000 hours, but only using my keyboard keys to play sounds was limiting my experience,
+because each keybinding is tied to a single sound.
+
+So I wanted to have an application where I could have a system of pages of sounds, so that the same keybind can be reused for multiple sound,
+using a pagination system to switch between pages.
+
+In Soundpad I had multiple layers of folders, and so I wanted to also have bookmarks on top of pages, you can then have this hierarchy:
+- Bookmarks
+  - Page 1
+    - Sound 1
+    - Sound 2
+    - [...]
+  - Page 2
+    - Sound 3
+    - Sound 4
+    - [...]
+
+Each page can contain up to 64 sounds, you can have as many pages as you want, and up to 8 bookmarks.
 
 ## Getting started
 
@@ -42,6 +58,7 @@ bookmark_5:
 bookmark_6:
 bookmark_7:
 debug_mode: true # If true, the application will print debug messages such as the available midi devices
+hold_to: Normal # Set by default, can be "Pause" or "Stop". See below for more information.
 ```
 
 **Note:** The midi_in_device and midi_out_device are the names of the devices that are available on your system.
@@ -65,6 +82,8 @@ The application will list the files and create the pages based on the order of t
 The first column is the note number, from 11 to 79, note that the numbers `19`, `29`, `39`, `49`, `59`, `69`, `79` are not available.
 The second column is the path to the sound file, can be absolute or relative.
 The third column is the color of the note, from 0 to 127.
+
+*PS: The note grid is the same for the following supported Launchpad models: MiniMK2, MiniMK3, X.*
 
 ![](colors.png)
 
@@ -90,9 +109,12 @@ This process can be achieved with other software or on other OS, but this is the
 
 ### Hold to play mode
 
-The hold_to_play mode allows you to play a sound by holding it, and stop it by releasing it.
-You can still play multiple sounds at the same time.
-The "blinking" status is disabled in this mode.
+Hold to play provides three different modes to control how the sounds are played when you press a note:
+- ⚪ Normal (aka Disabled): The sound will play even if you're not holding the note until it ends.
+- 🔴 Stop: The sound will stop when you release the note, pressing again will restart it from the beginning.
+- 🟡 Pause: The sound will pause when you release the note, pressing again will resume it from where it was paused or start it if the sound has ended.
+
+You can still play multiple sounds at the same time on each mode, however Pause mode is aimed for musics or long effects that you want to pause/play at will.
 
 ## Using on other midi devices
 

@@ -8,11 +8,11 @@ use std::thread;
 
 use config_file::FromConfigFile;
 use log::{debug, error};
-use rodio::Sink;
+use rodio::{OutputStream, Sink};
 
-use crate::config::Config;
+use crate::config::{Config, HoldMode};
 use crate::launchpad::Launchpad;
-use crate::referential::Referential;
+use crate::referential::{Note, Referential};
 
 mod config;
 mod referential;
@@ -21,6 +21,8 @@ mod midi;
 mod launchpad;
 
 const WHITE_COLOR: u8 = 3;
+const RED_COLOR: u8 = 5;
+const YELLOW_COLOR: u8 = 13;
 const GREEN_COLOR: u8 = 87;
 const VOICE_VOLUME: f32 = 1.0;
 const LOOPBACK_VOLUME: f32 = 0.10;
@@ -126,12 +128,29 @@ fn main() -> Result<(), Box<dyn Error>> {
 
   // Main loop to receive the midi events, also block the main thread from exiting.
   for (note_id, is_on) in rx_note {
-    if !is_on && config.is_hold_to_play_enabled() {
-      if let Some((audio_sink, virtual_sink)) = sinks.remove(&note_id) {
-        audio_sink.stop();
-        virtual_sink.stop();
+    if !is_on {
+      match config.get_hold_to_mode() {
+        HoldMode::Normal => {
+          continue;
+        }
+        HoldMode::Stop => {
+          if let Some((audio_sink, virtual_sink)) = sinks.remove(&note_id) {
+            audio_sink.stop();
+            virtual_sink.stop();
+
+          }
+        }
+        HoldMode::Pause => {
+          if let Some((audio_sink, virtual_sink)) = sinks.get(&note_id) {
+            audio_sink.pause();
+            virtual_sink.pause();
+          }
+        }
       }
-      continue;
+      if let Some(note) = referential.get_note(note_id) {
+        let thread_tx_midi = tx_midi.clone();
+        thread_tx_midi.send((note.note_id, note.color, false)).unwrap();
+      }
     }
     if is_on {
       if note_id == launchpad.end_session_note() {
@@ -191,23 +210,40 @@ fn main() -> Result<(), Box<dyn Error>> {
         // As without it,
         // the note would be tied with the temporary value from &referential.get_note(note_id)
         let note = note.clone();
-        let (audio_sink, duration) = audio::play_sound(&output_handle, note.path, VOICE_VOLUME);
-        let (virtual_sink, _duration) = audio::play_sound(&virtual_handle, note.path, LOOPBACK_VOLUME);
-
-        if !config.is_hold_to_play_enabled() && let Some(duration) = duration {
-          // Light on the note and light off after the duration
-          let thread_tx_midi = tx_midi.clone();
-          thread_tx_midi.send((note.note_id, note.color, true)).unwrap();
-          thread::spawn(move || {
-            thread::sleep(duration);
-            thread_tx_midi.send((note.note_id, note.color, false)).unwrap();
-          });
+        match config.get_hold_to_mode() {
+          HoldMode::Normal | HoldMode::Stop => play_sound(&mut config, &output_handle, &virtual_handle, &tx_midi, &mut sinks, note),
+          HoldMode::Pause => {
+            if let Some((audio_sink, virtual_sink)) = sinks.get(&note.note_id) {
+              if !audio_sink.empty() {
+                audio_sink.play();
+                virtual_sink.play();
+                continue;
+              }
+            }
+            play_sound(&mut config, &output_handle, &virtual_handle, &tx_midi, &mut sinks, note);
+          }
         }
-
-        sinks.insert(note.note_id, (audio_sink, virtual_sink));
       }
     }
   }
 
   Ok(())
+}
+
+fn play_sound(config: &mut Config, output_handle: &OutputStream, virtual_handle: &OutputStream, tx_midi: &Sender<MidiOutputEvent>, sinks: &mut HashMap<u8, (Sink, Sink)>, note: Note) {
+  let (audio_sink, duration) = audio::play_sound(&output_handle, note.path, VOICE_VOLUME);
+  let (virtual_sink, _duration) = audio::play_sound(&virtual_handle, note.path, LOOPBACK_VOLUME);
+
+  let thread_tx_midi = tx_midi.clone();
+  thread_tx_midi.send((note.note_id, note.color, true)).unwrap();
+
+  if config.get_hold_to_mode() == &HoldMode::Normal && let Some(duration) = duration {
+    // Light on the note and light off after the duration
+    thread::spawn(move || {
+      thread::sleep(duration);
+      thread_tx_midi.send((note.note_id, note.color, false)).unwrap();
+    });
+  }
+
+  sinks.insert(note.note_id, (audio_sink, virtual_sink));
 }

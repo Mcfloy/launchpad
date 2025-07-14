@@ -13,7 +13,14 @@ pub struct Config {
     bookmark_5: Option<String>,
     bookmark_6: Option<String>,
     bookmark_7: Option<String>,
-    hold_to_play: bool,
+    hold_to: HoldMode,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+pub(crate) enum HoldMode {
+    Normal,
+    Pause,
+    Stop
 }
 
 impl Config {
@@ -61,11 +68,15 @@ impl Config {
         }
     }
 
-    pub fn is_hold_to_play_enabled(&self) -> bool {
-        self.hold_to_play
+    pub fn get_hold_to_mode(&self) -> &HoldMode {
+        &self.hold_to
     }
 
     pub fn swap_hold_to_play(&mut self) {
-        self.hold_to_play = !self.hold_to_play;
+        self.hold_to = match self.hold_to {
+            HoldMode::Normal => HoldMode::Stop,
+            HoldMode::Stop => HoldMode::Pause,
+            HoldMode::Pause => HoldMode::Normal,
+        }
     }
 }

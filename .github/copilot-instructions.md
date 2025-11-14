@@ -2,261 +2,139 @@
 
 ## Project Overview
 
-**Launchpad** is a Rust application that plays sounds/music from a MIDI Launchpad controller (tested with Launchpad Mini MK3, MiniMK2, and X models). It provides a pagination system allowing the same keybind to trigger different sounds across multiple pages and bookmarks, with support for up to 64 sounds per page, unlimited pages, and 8 bookmarks.
+**Launchpad** is a Rust application for playing sounds/music from a MIDI Launchpad controller (Mini MK3, MiniMK2, X). It provides pagination allowing the same key to trigger different sounds across multiple pages and bookmarks: up to 64 sounds/page, unlimited pages, 8 bookmarks.
 
-- **Repository Size**: ~800KB (source only, ~660MB with build artifacts)
-- **Lines of Code**: ~758 lines of Rust
-- **Language**: Rust (requires nightly toolchain for `let_chains` feature)
-- **License**: GNU General Public License v3
-- **Dependencies**: MIDI I/O (midir), audio playback (rodio, cpal), config management (config-file, serde_yaml)
+- **Size**: ~800KB source, ~758 lines of Rust
+- **Language**: Rust nightly (requires `let_chains` feature)
+- **License**: GPL-3.0
+- **Key Dependencies**: midir (MIDI), rodio/cpal (audio), config-file/serde_yaml (config)
 
 ## Build Requirements
 
-### System Dependencies
-
-**ALWAYS install these system packages BEFORE attempting to build:**
+### System Dependencies (CRITICAL - Install First)
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y libasound2-dev pkg-config
 ```
 
-**Critical**: Without `libasound2-dev`, the build will fail with a `pkg-config` error for the `alsa` library. This is NOT optional.
+**Without `libasound2-dev`, builds WILL fail** with alsa-sys pkg-config errors.
 
-### Rust Toolchain
-
-**ALWAYS use Rust nightly toolchain**. The project uses the unstable `let_chains` feature and will NOT compile with stable Rust.
+### Rust Toolchain (MUST Use Nightly)
 
 ```bash
-# Install nightly toolchain
 rustup toolchain install nightly
-
-# Set nightly as default for this project directory
 rustup override set nightly
-
-# Verify nightly is active
-rustup show  # Should show nightly as active
+rustup show  # Verify nightly is active
 ```
+
+**Stable Rust will NOT compile** this project due to unstable `let_chains` feature.
 
 ### Build Commands
 
-**Build Sequence (ALWAYS run in this order):**
-
-1. **Development build** (~15 seconds from clean state):
-   ```bash
-   cargo build
-   ```
-
-2. **Release build** (~34 seconds from clean state):
-   ```bash
-   cargo build --release
-   ```
-
-3. **Quick check without building binary** (~8 seconds):
-   ```bash
-   cargo check
-   ```
-
-**Incremental builds** after code changes take ~3-8 seconds depending on the scope of changes.
-
-## Code Quality Tools
-
-### Formatting
-
-The codebase currently has formatting inconsistencies. Before running `cargo fmt`:
-
 ```bash
-# Add rustfmt component if not present
-rustup component add rustfmt --toolchain nightly
-
-# Check formatting (will show many diffs in referential.rs and midi.rs)
-cargo fmt --check
-
-# Auto-fix formatting
-cargo fmt
+cargo check         # Quick validation (~8s)
+cargo build         # Debug build (~15s clean, ~3-8s incremental)
+cargo build --release  # Release build (~34s clean)
+cargo fmt           # Format code (requires: rustup component add rustfmt --toolchain nightly)
+cargo clippy        # Lint code (requires: rustup component add clippy --toolchain nightly)
+cargo test          # No tests exist - will run 0 tests
 ```
 
-**Known formatting issues**: The project uses 2-space indentation in some files and inconsistent import ordering.
-
-### Linting
-
-```bash
-# Add clippy component if not present
-rustup component add clippy --toolchain nightly
-
-# Run clippy (currently shows 10 warnings)
-cargo clippy
-```
-
-**Known clippy warnings**:
-- Collapsible if statements (can use let_chains)
-- Needless borrows in function calls
-- Use of deprecated Into trait (should use From)
-
-**Note**: These warnings are not build-breaking but should be fixed when modifying nearby code.
-
-### Testing
-
-```bash
-cargo test
-```
-
-**Current state**: The project has NO unit tests. Do not expect any tests to run. Adding tests is acceptable but not required for most changes.
+**Known Issues**:
+- Formatting inconsistencies exist (2-space indentation, import ordering)
+- Clippy shows 10 warnings (collapsible ifs, needless borrows, deprecated Into)
+- serde_yaml 0.9.34 shows deprecation warning (expected, not critical)
 
 ## Project Structure
 
-### Root Directory Files
-
 ```
 .
-├── Cargo.toml           # Project manifest and dependencies
-├── Cargo.lock           # Dependency lock file
-├── config.yaml          # Runtime configuration (MIDI devices, bookmarks)
-├── README.md            # User documentation
-├── LICENSE              # GPL-3.0 license
-├── colors.png           # Launchpad color reference image
-├── pew.mp3              # Example sound file
-└── src/                 # Source code directory
+├── Cargo.toml           # Manifest (edition 2024)
+├── config.yaml          # Runtime config (MIDI/audio devices, bookmarks)
+├── src/
+│   ├── main.rs          # Entry point: event loop, MIDI/audio setup (~250 lines)
+│   ├── config.rs        # Config struct (MIDI devices, bookmarks, hold mode)
+│   ├── audio.rs         # Audio device selection and playback
+│   ├── midi.rs          # MIDI handling, grid management, actions
+│   ├── referential.rs   # Page/note management (Note, Page, Referential)
+│   └── launchpad/mod.rs # Model-specific note mappings
+└── pages/               # Sound page files (created at runtime)
 ```
 
-### Source Code Structure
+### Key Components
 
-```
-src/
-├── main.rs              # Application entry point (~250 lines)
-├── config.rs            # Configuration struct and parsing (~82 lines)
-├── audio.rs             # Audio device selection and playback (~33 lines)
-├── midi.rs              # MIDI device handling and grid management (~134 lines)
-├── referential.rs       # Page and note management (~175 lines)
-└── launchpad/
-    └── mod.rs           # Launchpad model definitions (~91 lines)
-```
+**main.rs**: Loads config → sets up MIDI I/O → sets up audio (default + virtual) → initializes referential from `pages/` → processes MIDI events → plays sounds → manages hold modes (Normal/Stop/Pause)
 
-### Key Architecture Components
+**config.rs**: MIDI devices, audio devices, 7 bookmarks, hold mode setting
 
-1. **main.rs**: Main event loop that:
-   - Loads configuration from `config.yaml`
-   - Sets up MIDI input/output connections
-   - Sets up audio output devices (default + virtual)
-   - Initializes the referential (page system) from the `pages/` folder
-   - Processes MIDI note events and plays corresponding sounds
-   - Manages hold-to-play modes (Normal, Stop, Pause)
+**referential.rs**: 
+- `Note`: sound mapping (note_id, path, color)
+- `Page`: collection of notes
+- `Referential`: page management and navigation
 
-2. **config.rs**: Defines `Config` struct with:
-   - MIDI device names (input/output)
-   - Audio device names (output/virtual)
-   - 7 bookmark paths (bookmark_1 through bookmark_7)
-   - Hold mode setting (Normal/Stop/Pause)
-
-3. **audio.rs**: Handles:
-   - Enumerating available audio output devices
-   - Creating output streams for specific devices
-   - Playing audio files with volume control
-
-4. **midi.rs**: Manages:
-   - MIDI device enumeration and connection
-   - Grid refresh and clearing
-   - Special action handlers (stop, end session)
-   - Bookmark and page navigation button colors
-
-5. **referential.rs**: Implements:
-   - `Note`: A sound file mapping (note_id, file path, color)
-   - `Page`: Collection of up to 64 notes
-   - `Referential`: Page management (current page, bookmarks, navigation)
-
-6. **launchpad/mod.rs**: Defines note mappings for different Launchpad models (MiniMk2, MiniMk3, X)
-
-### Configuration Files
-
-- **config.yaml**: Runtime configuration at project root (NOT in src/)
-  - Required before running the application
-  - Specifies MIDI device names (find via debug_mode: true)
-  - Specifies audio output device names
-  - Defines bookmark folder names
-
-- **Cargo.toml**: Build configuration
-  - Edition: 2024 (latest Rust edition)
-  - Notable: Uses deprecated `serde_yaml` 0.9.34 (shows warning)
-
-### Pages System
-
-The application looks for a `pages/` directory (configurable via bookmarks). Each file in this directory becomes a page:
-
-```
-pages/
-├── 0            # Page 0
-├── 1            # Page 1
-└── 2            # Page 2
-```
-
-**Page file format** (semicolon-separated):
+**Pages format** (semicolon-separated):
 ```
 11;pew.mp3;13
 ```
-- Column 1: Note ID (11-89, excluding 19,29,39,49,59,69,79)
-- Column 2: Sound file path (absolute or relative)
-- Column 3: Color code (0-127)
+Note ID (11-89, skip 19,29,39,49,59,69,79) ; File path ; Color (0-127)
 
-## Common Issues and Workarounds
+## Common Issues & Solutions
 
-### Build Failures
+| Issue | Solution |
+|-------|----------|
+| alsa-sys build failure | Install `libasound2-dev` |
+| let_chains feature error | Use nightly: `rustup override set nightly` |
+| cargo-fmt not installed | `rustup component add rustfmt --toolchain nightly` |
+| cargo-clippy not installed | `rustup component add clippy --toolchain nightly` |
+| Runtime failure | Check config.yaml exists, MIDI devices connected, pages/ has files |
 
-1. **alsa-sys build failure**: Install `libasound2-dev` (see System Dependencies)
-2. **"let_chains" feature error**: Switch to nightly toolchain (see Rust Toolchain)
-3. **"cargo-fmt not installed"**: Run `rustup component add rustfmt --toolchain nightly`
-4. **"cargo-clippy not installed"**: Run `rustup component add clippy --toolchain nightly`
-
-### Runtime Issues
-
-The application will fail at runtime if:
-- `config.yaml` is missing or malformed
-- MIDI devices specified in config are not connected
-- Audio devices specified in config don't exist
-- `pages/` directory is empty
-
-**Debug mode**: Set `debug_mode: true` in `config.yaml` to see available MIDI and audio devices.
+**Debug Mode**: Set `debug_mode: true` in config.yaml to list available MIDI/audio devices.
 
 ## Development Workflow
 
-### Making Code Changes
+1. Ensure nightly: `rustup show`
+2. Make changes
+3. Validate: `cargo check` (fast)
+4. Build: `cargo build`
+5. Format: `cargo fmt` (recommended)
+6. Lint: `cargo clippy` (fix warnings in modified code)
 
-1. **ALWAYS ensure nightly toolchain is active**: `rustup show`
-2. **Make your changes** to source files
-3. **Quick validation**: `cargo check` (~3-8 seconds)
-4. **Full build**: `cargo build` (~3-8 seconds incremental)
-5. **Format code**: `cargo fmt` (optional but recommended)
-6. **Lint code**: `cargo clippy` (fix warnings in modified code)
+**Binary locations**:
+- Debug: `target/debug/launch-soundpad` (~52 MB with symbols)
+- Release: `target/release/launch-soundpad` (optimized)
 
-### Binary Locations
+**Testing**: No unit tests exist. Manual testing requires physical Launchpad, configured config.yaml, pages/, and audio devices.
 
-- Debug: `target/debug/launch-soundpad` (~52 MB with debug symbols)
-- Release: `target/release/launch-soundpad` (optimized binary)
+## Configuration
 
-### Testing Changes
+**config.yaml** (project root, required for runtime):
+```yaml
+midi_in_device: MIDIIN2 (LPMiniMK3 MIDI)
+midi_out_device: MIDIOUT2 (LPMiniMK3 MIDI)
+output_device: 
+virtual_device: CABLE Input (VB-Audio Virtual Cable)
+bookmark_1: pages
+bookmark_2: 
+# ... bookmark_7
+debug_mode: true
+hold_to: Normal  # or Stop, Pause
+```
 
-Since there are no unit tests, manual testing requires:
-1. A physical Launchpad MIDI controller
-2. Configured `config.yaml` with valid device names
-3. A `pages/` directory with valid page files
-4. Audio output devices (regular + virtual like VB-Audio Cable)
+## CI/CD
 
-**Note**: Most code changes can be validated through `cargo check` and `cargo build` without runtime testing.
+**No GitHub Actions or CI configured.** All validation is local only.
 
-## GitHub Actions / CI
+## Known TODOs (Don't Fix Unless Asked)
 
-**Current state**: No GitHub Actions workflows or CI pipelines are configured. All validation must be done locally.
+- `src/main.rs:39`: Auto-generate default config if missing
+- `src/config.rs:27`: Create Config init function
 
-## TODOs in Codebase
+## Important Reminders
 
-The codebase contains these known TODOs (do NOT fix unless specifically asked):
-- `src/main.rs:39`: Load config file, generate default if not found
-- `src/config.rs:27`: Create an init function for Config
-
-## Important Notes
-
-- **Trust these instructions**: They are validated against the actual codebase. Only search for additional information if something here is incomplete or incorrect.
-- **Nightly toolchain is mandatory**: Do NOT attempt builds with stable Rust.
-- **System dependencies are required**: Install libasound2-dev before any build attempts.
-- **No tests exist**: Do not expect `cargo test` to run any tests.
-- **Format before committing**: Run `cargo fmt` to maintain consistency.
-- **The project uses GPL-3.0**: Any modifications must comply with this license.
+✓ **Trust these instructions** - validated against actual codebase  
+✓ **Nightly is mandatory** - stable will fail  
+✓ **Install libasound2-dev first** - prevents build failures  
+✓ **No tests exist** - cargo test runs 0 tests  
+✓ **GPL-3.0 license** - modifications must comply  
+✓ **Format before commit** - run `cargo fmt`
